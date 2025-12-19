@@ -32,7 +32,9 @@ pub struct PlatformGuard;
 impl PlatformGuard {
     pub fn ensure(enabled_any: bool) -> Result<()> {
         if !enabled_any {
-            return Err(anyhow!("No platform enabled! Please enable them in /config/application.yml"));
+            return Err(anyhow!(
+                "No platform enabled! Please enable them in /config/application.toml"
+            ));
         }
         Ok(())
     }

@@ -1,0 +1,48 @@
+prefix = "/"
+language = "zh-cn"
+
+[telegram]
+enabled = false
+bot-token = ""
+bot-username = ""
+
+[discord]
+enabled = false
+token = ""
+
+[onebot]
+enabled = false
+ws-url = "ws://127.0.0.1:6700"
+access-token = ""
+
+[commands.switch]
+weather = false
+translate = false
+
+[commands.github]
+enabled = true
+token = ""
+
+[commands.music.spotify]
+enabled = false
+client-id = ""
+client-secret = ""
+
+[commands.music.soundcloud]
+enabled = false
+client-id = ""
+
+[commands.translate]
+default-lang = "zh-Hans"
+
+[commands.twenty-four]
+time-limit = 300000
+
+[proxy]
+enabled = false
+type = "NONE"
+host = "127.0.0.1"
+port = 8000
+username = ""
+password = ""
+non-proxy-hosts-list = ["*.local", "localhost", "127.*", "10.*", "192.168.*"]

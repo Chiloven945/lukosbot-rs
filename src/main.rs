@@ -12,7 +12,6 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-use crate::config::ConfigLifecycle;
 use crate::core::{CommandRegistry, MessageDispatcher, MessageSenderHub, PipelineProcessor};
 use crate::lifecycle::{BaseCloseable, PlatformGuard};
 use crate::platform::{discord::DiscordReceiver, telegram::TelegramReceiver};
@@ -29,13 +28,7 @@ async fn main() -> Result<()> {
 
     // ---- config ----
     let t0 = Instant::now();
-    let mut cfg_lc = ConfigLifecycle::new();
-    cfg_lc.start().context("ConfigLifecycle.start failed")?;
-    let props = Arc::new(
-        cfg_lc
-            .load_props()
-            .context("ConfigLifecycle.load_props failed")?,
-    );
+    let props = Arc::new(config::load_or_init()?);
     info!(
         "config loaded in {:?} (prefix='{}', telegram_enabled={}, discord_enabled={})",
         t0.elapsed(),
@@ -100,7 +93,7 @@ async fn main() -> Result<()> {
         enabled_any = true;
 
         info!("starting DiscordReceiver...");
-        let dc = DiscordReceiver::new(props.discord.token.clone());
+        let dc = DiscordReceiver::new(props.discord.token.clone(), props.proxy.clone());
 
         dc.bind(in_tx.clone()).await;
         debug!("DiscordReceiver bind done");

@@ -14,16 +14,14 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 azalea-brigadier = "=0.14.0"
 url = "2"
-
-# Telegram
+config = "0.15.19"
+toml = "0.9.10"
 teloxide = "0.17"
-
-# Discord
-serenity = { version = "0.12", default-features = false, features = [
-    "client",
+serenity = { version = "0.12", default-features = false, features = ["client",
     "gateway",
     "model",
     "http",
     "builder",
-    "rustls_backend"
-] }
+    "rustls_backend"] }
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "socks"] }
+
