@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::commands::{help::HelpCommand, ping::PingCommand};
+use crate::commands::{github::GitHubCommand, help::HelpCommand, ping::PingCommand};
 use crate::config::AppProperties;
 use crate::core::command_source::CommandSource;
 use crate::core::dispatcher::CommandDispatcher;
@@ -29,9 +29,17 @@ impl CommandRegistry {
     pub fn build(props: Arc<AppProperties>) -> Arc<Self> {
         Arc::new_cyclic(|weak_reg| {
             let help = HelpCommand::new(weak_reg.clone(), props.clone());
+            let github = GitHubCommand::new(
+                Option::from(props.commands.github.token.clone()),
+                &props.proxy.clone(),
+            );
 
             CommandRegistry {
-                cmds: vec![Arc::new(PingCommand), Arc::new(help)],
+                cmds: vec![
+                    Arc::new(PingCommand) as Arc<dyn BotCommand>,
+                    Arc::new(github) as Arc<dyn BotCommand>,
+                    Arc::new(help) as Arc<dyn BotCommand>,
+                ],
             }
         })
     }
