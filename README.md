@@ -52,20 +52,30 @@ are respected:
     - Repository: [azalea-rs/brigadier](https://github.com/azalea-rs/azalea/tree/main/azalea-brigadier)
     - License: [MIT](https://github.com/azalea-rs/azalea/blob/main/LICENSE.md)
 
+- **config**
+  - Repository: [rust-cli/config-rs](https://github.com/rust-cli/config-rs)
+  - License: [MIT](https://github.com/rust-cli/config-rs/blob/master/LICENSE-MIT)
+    and [Apache-2.0](https://github.com/rust-cli/config-rs/blob/master/LICENSE-APACHE)
+
 - **regex**
     - Repository: [rust-lang/regex](https://github.com/rust-lang/regex)
     - License: [MIT](https://github.com/rust-lang/regex/blob/master/LICENSE-MIT)
       and [Apache-2.0](https://github.com/rust-lang/regex/blob/master/LICENSE-APACHE)
+
+- **reqwest**
+  - Repository: [seanmonstar/reqwest](https://github.com/seanmonstar/reqwest)
+  - License: [MIT](https://github.com/seanmonstar/reqwest/blob/master/LICENSE-MIT)
+    and [Apache-2.0](https://github.com/seanmonstar/reqwest/blob/master/LICENSE-APACHE)
 
 - **serde**
     - Repository: [serde-rs/serde](https://github.com/serde-rs/serde)
     - License: [MIT](https://github.com/serde-rs/serde/blob/master/LICENSE-MIT)
       and [Apache-2.0](https://github.com/serde-rs/serde/blob/master/LICENSE-APACHE)
 
-- **serde_yaml**
-    - Repository: [dtolnay/serde-yaml](https://github.com/dtolnay/serde-yaml)
-    - License: [MIT](https://github.com/dtolnay/serde-yaml/blob/master/LICENSE-MIT)
-      and [Apache-2.0](https://github.com/dtolnay/serde-yaml/blob/master/LICENSE-APACHE)
+- **serde_json**
+  - Repository: [dtolnay/serde-json](https://github.com/dtolnay/serde-yaml)
+  - License: [MIT](https://github.com/dtolnay/serde-json/blob/master/LICENSE-MIT)
+    and [Apache-2.0](https://github.com/dtolnay/serde-json/blob/master/LICENSE-APACHE)
 
 - **serenity**
     - Repository: [serenity-rs/serenity](https://github.com/serenity-rs/serenity)
@@ -78,6 +88,11 @@ are respected:
 - **tokio**
     - Repository: [tokio-rs/tokio](https://github.com/tokio-rs/tokio)
     - License: [MIT](https://github.com/tokio-rs/tokio/blob/master/LICENSE)
+
+- **toml**
+  - Repository: [toml-rs/toml](https://github.com/toml-rs/toml)
+  - License: [MIT](https://github.com/toml-rs/toml/blob/master/LICENSE-MIT)
+    and [Apache-2.0](https://github.com/toml-rs/toml/blob/master/LICENSE-APACHE)
 
 - **tracing**
     - Repository: [tokio-rs/tracing](https://github.com/tokio-rs/tracing)
