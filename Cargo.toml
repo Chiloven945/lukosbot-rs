@@ -8,7 +8,6 @@ anyhow = "1"
 async-trait = "0.1"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -24,4 +23,5 @@ serenity = { version = "0.12", default-features = false, features = ["client",
     "builder",
     "rustls_backend"] }
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "socks"] }
+serde_json = "1.0.145"
 

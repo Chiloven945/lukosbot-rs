@@ -1,17 +1,19 @@
 // src/commands/github.rs
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use crate::config::ProxyConfig;
-use crate::core::command_registry::BotCommand;
-use crate::core::command_source::CommandSource;
-use crate::core::dispatcher::CommandDispatcher;
 use anyhow::{anyhow, Result};
 use azalea_brigadier::prelude::*;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
 use reqwest::Client;
-use serde_yaml::Value;
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use tracing::warn;
 use url::Url;
+
+use crate::config::ProxyConfig;
+use crate::core::command_registry::BotCommand;
+use crate::core::command_source::CommandSource;
+use crate::core::dispatcher::CommandDispatcher;
 
 const USAGE: &str = r#"用法：
 `/github user <username>`     # 查询用户信息
@@ -22,6 +24,38 @@ const USAGE: &str = r#"用法：
 `/github repo Chiloven945/lukosbot2`
 `/github search lukosbot --top=5 --lang=java --sort=stars --order=desc`
 "#;
+
+// -------------------- GitHub API types --------------------
+
+#[derive(Debug, Deserialize)]
+struct GhError {
+    message: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhUser {
+    login: String,
+    name: Option<String>,
+    html_url: String,
+    public_repos: i64,
+    followers: i64,
+    following: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhRepo {
+    full_name: String,
+    html_url: String,
+    language: Option<String>,
+    stargazers_count: i64,
+    forks_count: i64,
+    description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhSearchResp {
+    items: Vec<GhRepo>,
+}
 
 // -------------------- GitHubApi --------------------
 
@@ -36,6 +70,11 @@ impl GitHubApi {
     const READ_TIMEOUT: Duration = Duration::from_millis(10000);
 
     pub fn new(token: Option<String>, proxy: &ProxyConfig) -> Self {
+        let token = token.and_then(|t| {
+            let t = t.trim().to_string();
+            if t.is_empty() { None } else { Some(t) }
+        });
+
         let mut builder = Client::builder()
             .connect_timeout(Self::CONN_TIMEOUT)
             .timeout(Self::READ_TIMEOUT);
@@ -45,31 +84,31 @@ impl GitHubApi {
             .expect("apply proxy failed");
 
         let client = builder.build().expect("reqwest client build failed");
-
         Self { client, token }
     }
 
-    pub async fn get_user(&self, username: &str) -> Result<Value> {
-        self.get(&format!("/users/{username}"), &[]).await
+    async fn get_user(&self, username: &str) -> Result<GhUser> {
+        self.get_typed(&format!("/users/{username}"), &[]).await
     }
 
-    pub async fn get_repo(&self, owner: &str, repo: &str) -> Result<Value> {
-        self.get(&format!("/repos/{owner}/{repo}"), &[]).await
+    async fn get_repo(&self, owner: &str, repo: &str) -> Result<GhRepo> {
+        self.get_typed(&format!("/repos/{owner}/{repo}"), &[]).await
     }
 
-    pub async fn search_repos(
+    async fn search_repos(
         &self,
         keywords: &str,
         sort: Option<&str>,
         order: Option<&str>,
         language: Option<&str>,
         per_page: usize,
-    ) -> Result<Value> {
+    ) -> Result<GhSearchResp> {
         let mut full_q = keywords.to_string();
         if let Some(lang) = language {
-            if !lang.trim().is_empty() {
+            let lang = lang.trim();
+            if !lang.is_empty() {
                 full_q.push_str(" language:");
-                full_q.push_str(lang.trim());
+                full_q.push_str(lang);
             }
         }
 
@@ -84,10 +123,10 @@ impl GitHubApi {
             q.push(("per_page", per_page.min(10).to_string()));
         }
 
-        self.get("/search/repositories", &q).await
+        self.get_typed("/search/repositories", &q).await
     }
 
-    async fn get(&self, path: &str, query: &[(&str, String)]) -> Result<Value> {
+    async fn get_typed<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T> {
         let mut url = Url::parse(Self::BASE)?.join(path)?;
         {
             let mut qp = url.query_pairs_mut();
@@ -113,40 +152,50 @@ impl GitHubApi {
         let status = resp.status();
         let body = resp.text().await?;
 
-        let v: Value = serde_yaml::from_str(&body).map_err(|e| anyhow!("bad json: {e}"))?;
-
-        if status.as_u16() >= 400 {
-            let msg = v
-                .get("message")
-                .and_then(|x| x.as_str())
-                .unwrap_or_else(|| status.canonical_reason().unwrap_or("HTTP error"));
-            return Err(anyhow!(msg.to_string()));
+        if !status.is_success() {
+            let msg = serde_json::from_str::<GhError>(&body)
+                .ok()
+                .and_then(|e| e.message)
+                .or_else(|| status.canonical_reason().map(|s| s.to_string()))
+                .unwrap_or_else(|| "HTTP error".to_string());
+            return Err(anyhow!(msg));
         }
 
+        let v = serde_json::from_str::<T>(&body).map_err(|e| anyhow!("bad json: {e}"))?;
         Ok(v)
     }
 }
 
-// -------------------- GitHubCommand (ported from Java) --------------------
+// -------------------- GitHubCommand --------------------
 
 pub struct GitHubCommand {
     api: Arc<GitHubApi>,
 }
 
 impl GitHubCommand {
+    pub fn new(token: Option<String>, proxy: &ProxyConfig) -> Self {
+        Self {
+            api: Arc::new(GitHubApi::new(token, proxy)),
+        }
+    }
+
     async fn handle_user(api: &GitHubApi, username: &str) -> String {
         match api.get_user(username).await {
-            Ok(obj) => {
-                let login = get_s(&obj, "login").unwrap_or("");
-                let name = get_s(&obj, "name").unwrap_or("");
-                let url = get_s(&obj, "html_url").unwrap_or("");
-                let repos = get_i(&obj, "public_repos");
-                let followers = get_i(&obj, "followers");
-                let following = get_i(&obj, "following");
+            Ok(u) => {
+                let display = u
+                    .name
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or(u.login.as_str());
 
-                let display = if name.trim().is_empty() { login } else { name };
                 format!(
-                    "用户: {display} ({login})\n主页: {url}\n公开仓库: {repos} | 粉丝: {followers} | 关注: {following}\n"
+                    "用户: {display} ({login})\n主页: {url}\n公开仓库: {repos} | 粉丝: {followers} | 关注: {following}\n",
+                    display = display,
+                    login = u.login,
+                    url = u.html_url,
+                    repos = u.public_repos,
+                    followers = u.followers,
+                    following = u.following,
                 )
             }
             Err(e) => {
@@ -163,17 +212,22 @@ impl GitHubCommand {
         };
 
         match api.get_repo(owner, repo).await {
-            Ok(obj) => {
-                let full_name = get_s(&obj, "full_name").unwrap_or("");
-                let url = get_s(&obj, "html_url").unwrap_or("");
-                let lang = get_s(&obj, "language").unwrap_or("未知");
-                let stars = get_i(&obj, "stargazers_count");
-                let forks = get_i(&obj, "forks_count");
-                let desc = get_s(&obj, "description").unwrap_or("无");
-                let desc = if desc.trim().is_empty() { "无" } else { desc };
+            Ok(r) => {
+                let lang = r.language.as_deref().unwrap_or("未知");
+                let desc = r
+                    .description
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or("无");
 
                 format!(
-                    "仓库: {full_name}\n主页: {url}\n语言: {lang} | Star: {stars} | Fork: {forks}\n描述: {desc}\n"
+                    "仓库: {full_name}\n主页: {url}\n语言: {lang} | Star: {stars} | Fork: {forks}\n描述: {desc}\n",
+                    full_name = r.full_name,
+                    url = r.html_url,
+                    lang = lang,
+                    stars = r.stargazers_count,
+                    forks = r.forks_count,
+                    desc = desc,
                 )
             }
             Err(e) => {
@@ -196,25 +250,18 @@ impl GitHubCommand {
             )
             .await
         {
-            Ok(result) => {
-                let items = result.get("items").and_then(|v| v.as_sequence());
-                let Some(items) = items else {
-                    return "未搜索到任何仓库。".to_string();
-                };
-                if items.is_empty() {
+            Ok(resp) => {
+                if resp.items.is_empty() {
                     return "未搜索到任何仓库。".to_string();
                 }
 
-                let count = items.len().min(p.top);
+                let count = resp.items.len().min(p.top);
                 let mut sb = String::from("【仓库搜索结果】\n");
-                for repo in items.iter().take(count) {
-                    let full_name = get_s(repo, "full_name").unwrap_or("");
-                    let stars = get_i(repo, "stargazers_count");
-                    let url = get_s(repo, "html_url").unwrap_or("");
-                    sb.push_str(full_name);
+                for repo in resp.items.iter().take(count) {
+                    sb.push_str(&repo.full_name);
                     sb.push_str(" - ");
-                    sb.push_str(&format!("{stars}★\n"));
-                    sb.push_str(url);
+                    sb.push_str(&format!("{}★\n", repo.stargazers_count));
+                    sb.push_str(&repo.html_url);
                     sb.push_str("\n\n");
                 }
                 sb
@@ -223,12 +270,6 @@ impl GitHubCommand {
                 warn!("github search 失败: {q} err={e:?}");
                 format!("搜索失败：{e}")
             }
-        }
-    }
-
-    pub fn new(token: Option<String>, proxy: &ProxyConfig) -> Self {
-        Self {
-            api: Arc::new(GitHubApi::new(token, proxy)),
         }
     }
 }
@@ -263,10 +304,10 @@ impl BotCommand for GitHubCommand {
                             let api = api_user.clone();
 
                             tokio::spawn(async move {
-                                let text =
-                                    GitHubCommand::handle_user(api.as_ref(), &username).await;
+                                let text = GitHubCommand::handle_user(api.as_ref(), &username).await;
                                 src.reply(text);
                             });
+
                             1
                         },
                     )),
@@ -279,10 +320,10 @@ impl BotCommand for GitHubCommand {
                             let api = api_repo.clone();
 
                             tokio::spawn(async move {
-                                let text =
-                                    GitHubCommand::handle_repo(api.as_ref(), &repo_arg).await;
+                                let text = GitHubCommand::handle_repo(api.as_ref(), &repo_arg).await;
                                 src.reply(text);
                             });
+
                             1
                         },
                     )),
@@ -298,6 +339,7 @@ impl BotCommand for GitHubCommand {
                                 let text = GitHubCommand::handle_search(api.as_ref(), &query).await;
                                 src.reply(text);
                             });
+
                             1
                         },
                     )),
@@ -310,15 +352,7 @@ impl BotCommand for GitHubCommand {
     }
 }
 
-// -------------------- helpers (ported from Java small utils) --------------------
-
-fn get_s<'a>(obj: &'a Value, k: &str) -> Option<&'a str> {
-    obj.get(k)?.as_str()
-}
-
-fn get_i(obj: &Value, k: &str) -> i64 {
-    obj.get(k).and_then(|v| v.as_i64()).unwrap_or(0)
-}
+// -------------------- params parser --------------------
 
 #[derive(Debug, Clone)]
 struct Params {
@@ -368,7 +402,10 @@ impl Params {
             keywords
         };
 
-        let top = if top == 0 { 3 } else { top.min(10) };
+        let top = match top {
+            0 => 3,
+            n => n.min(10),
+        };
 
         Self {
             keywords,
