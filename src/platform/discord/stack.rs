@@ -1,31 +1,37 @@
+// src/platform/discord/stack.rs
 use anyhow::Result;
 use serenity::all::{
-    async_trait, CommandDataOptionValue, Context, EventHandler, GatewayIntents,
-    Interaction, Message as DiscordMessage, Ready,
+    CommandDataOptionValue, Context, EventHandler, GatewayIntents, Interaction,
+    Message as DiscordMessage, Ready, async_trait,
 };
-use serenity::client::Client;
+use serenity::client::ClientBuilder;
+use serenity::http::HttpBuilder;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, mpsc};
 use tracing::error;
 
+use crate::config::ProxyConfig;
 use crate::model::{Address, ChatPlatform, MessageIn};
 
 pub type InSink = mpsc::UnboundedSender<MessageIn>;
 
 pub struct DiscordStack {
     pub(crate) token: String,
+    pub(crate) proxy: ProxyConfig,
+
     sink: RwLock<Option<InSink>>,
     started: AtomicBool,
     shard_shutdown: Mutex<Option<serenity::gateway::ShardManager>>,
 }
 
 impl DiscordStack {
-    pub fn new(token: String) -> Arc<Self> {
+    pub fn new(token: String, proxy: ProxyConfig) -> Arc<Self> {
         Arc::new(Self {
             token,
+            proxy,
             sink: RwLock::new(None),
             started: AtomicBool::new(false),
             shard_shutdown: Mutex::new(None),
@@ -49,7 +55,14 @@ impl DiscordStack {
             stack: self.clone(),
         };
 
-        let mut client = Client::builder(&self.token, intents)
+        let reqwest_client = self
+            .proxy
+            .apply_to_reqwest_builder(reqwest::Client::builder())?
+            .build()?;
+
+        let http = HttpBuilder::new(&self.token).client(reqwest_client).build();
+
+        let mut client = ClientBuilder::new_with_http(http, intents)
             .event_handler(handler)
             .await?;
 
@@ -61,7 +74,6 @@ impl DiscordStack {
         });
 
         let _ = mgr;
-
         Ok(())
     }
 }
@@ -98,9 +110,7 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn ready(&self, _ctx: Context, _ready: Ready) {
-        // 你 Java 的 ensureStarted 里会注册 slash commands；这里先留钩子
-    }
+    async fn ready(&self, _ctx: Context, _ready: Ready) {}
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         let Some(cmd) = interaction.as_command() else {

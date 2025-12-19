@@ -5,9 +5,15 @@ use crate::core::dispatcher::{literal, CommandContext, CommandDispatcher};
 pub struct PingCommand;
 
 impl BotCommand for PingCommand {
-    fn name(&self) -> &'static str { "ping" }
-    fn description(&self) -> &'static str { "Ping command" }
-    fn usage(&self) -> &'static str { "ping" }
+    fn name(&self) -> &'static str {
+        "ping"
+    }
+    fn description(&self) -> &'static str {
+        "Ping command"
+    }
+    fn usage(&self) -> &'static str {
+        "ping"
+    }
 
     fn register(&self, d: &mut CommandDispatcher<CommandSource>) {
         d.register(
