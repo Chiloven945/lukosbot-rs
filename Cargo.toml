@@ -22,6 +22,6 @@ serenity = { version = "0.12", default-features = false, features = ["client",
     "http",
     "builder",
     "rustls_backend"] }
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "socks"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-tls", "socks"] }
 serde_json = "1.0.145"
 
