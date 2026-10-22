@@ -1,0 +1,37 @@
+# Example configuration. Copy to `config/application.toml` and adjust.
+# Secrets should be supplied through environment variables, not this file.
+
+[app]
+environment = "development"
+shutdown_timeout_secs = 15
+
+[logging]
+format = "pretty" # pretty | compact | json
+filter = "info,sqlx=warn"
+
+[runtime]
+inbound_queue_capacity = 256
+outbound_queue_capacity = 128
+handler_timeout_secs = 30
+send_timeout_secs = 20
+
+[http]
+connect_timeout_secs = 5
+request_timeout_secs = 20
+max_response_bytes = 10485760
+user_agent = "LukosBot/0.1 (+https://github.com/Chiloven945/lukosbot-rs)"
+proxy = "" # e.g. "http://127.0.0.1:8000" or "socks5h://127.0.0.1:1080"
+
+[storage]
+sqlite_path = "./data/lukosbot.sqlite3"
+busy_timeout_ms = 5000
+max_connections = 5
+create_parent_dirs = true
+
+[platforms.telegram]
+enabled = false
+token = ""
+
+[platforms.discord]
+enabled = false
+token = ""

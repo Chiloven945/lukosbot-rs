@@ -1,0 +1,31 @@
+[package]
+name = "lukosbot-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+test-util = []
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+lukosbot-domain.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[[test]]
+name = "runtime"
+required-features = ["test-util"]

@@ -1,3 +1,5 @@
 /target
-/config
-/Cargo.lock
+/data
+/config/application.toml
+.env
+.idea

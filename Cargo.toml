@@ -1,27 +1,87 @@
-[package]
-name = "lukosbot-rs"
+[workspace]
+resolver = "3"
+members = [
+    "crates/domain",
+    "crates/core",
+    "crates/infra",
+    "crates/platform-telegram",
+    "crates/platform-discord",
+    "crates/app",
+]
+default-members = ["crates/app"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.94"
+license = "Apache-2.0"
+repository = "https://github.com/Chiloven945/lukosbot-rs"
+publish = false
 
-[dependencies]
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "warn"
+todo = "warn"
+print_stdout = "warn"
+
+[workspace.dependencies]
+# Internal crates
+lukosbot-domain = { version = "0.1.0", path = "crates/domain" }
+lukosbot-core = { version = "0.1.0", path = "crates/core" }
+lukosbot-infra = { version = "0.1.0", path = "crates/infra" }
+lukosbot-platform-telegram = { version = "0.1.0", path = "crates/platform-telegram" }
+lukosbot-platform-discord = { version = "0.1.0", path = "crates/platform-discord" }
+
+# Shared third-party dependencies
 anyhow = "1"
 async-trait = "0.1"
-regex = "1"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+clap = { version = "4.6", features = ["derive", "env"] }
+config = { version = "0.15", features = ["toml"] }
+dotenvy = "0.15"
+fastrand = "2"
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls",
+    "http2",
+    "json",
+    "charset",
+    "socks",
+] }
+secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-azalea-brigadier = "=0.15.1"
-url = "2"
-config = "0.15.19"
-toml = "0.9.10"
-teloxide = "0.17"
-serenity = { version = "0.12", default-features = false, features = ["client",
+serde_json = "1"
+serenity = { version = "0.12", default-features = false, features = [
+    "client",
     "gateway",
     "model",
     "http",
     "builder",
-    "rustls_backend"] }
-reqwest = { version = "0.13", default-features = false, features = ["rustls-tls", "socks"] }
-serde_json = "1.0.145"
+    "native_tls_backend",
+] }
+sqlx = { version = "0.9", default-features = false, features = [
+    "runtime-tokio",
+    "sqlite",
+    "migrate",
+    "macros",
+] }
+teloxide = { version = "0.17", default-features = false, features = ["rustls"] }
+thiserror = "2"
+tokio = { version = "1.54", features = [
+    "rt-multi-thread",
+    "macros",
+    "signal",
+    "net",
+    "sync",
+    "time",
+] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+url = "2.5"
 
+# Test dependencies
+tempfile = "3"
+wiremock = "0.6"

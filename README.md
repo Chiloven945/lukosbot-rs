@@ -2,107 +2,96 @@
 
 # lukosbot-rs
 
-[![Visitors](https://api.visitorbadge.io/api/visitors?path=https%3A%2F%2Fgithub.com%2FChiloven945%2Flukosbot-rs&labelColor=%23444444&countColor=%23f24822&style=flat-square&labelStyle=none)](https://visitorbadge.io/status?path=https%3A%2F%2Fgithub.com%2FChiloven945%2Flukosbot-rs)
-[![Stars](https://img.shields.io/github/stars/Chiloven945/lukosbot-rs?style=flat-square&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZlcnNpb249IjEiIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiI+PHBhdGggZD0iTTggLjI1YS43NS43NSAwIDAgMSAuNjczLjQxOGwxLjg4MiAzLjgxNSA0LjIxLjYxMmEuNzUuNzUgMCAwIDEgLjQxNiAxLjI3OWwtMy4wNDYgMi45Ny43MTkgNC4xOTJhLjc1MS43NTEgMCAwIDEtMS4wODguNzkxTDggMTIuMzQ3bC0zLjc2NiAxLjk4YS43NS43NSAwIDAgMS0xLjA4OC0uNzlsLjcyLTQuMTk0TC44MTggNi4zNzRhLjc1Ljc1IDAgMCAxIC40MTYtMS4yOGw0LjIxLS42MTFMNy4zMjcuNjY4QS43NS43NSAwIDAgMSA4IC4yNVoiIGZpbGw9IiNlYWM1NGYiLz48L3N2Zz4=&logoSize=auto&label=Stars&labelColor=444444&color=eac54f)](https://github.com/Chiloven945/lukosbot-rs/)
-[![GitHub CI](https://img.shields.io/github/actions/workflow/status/Chiloven945/lukosbot-rs/cargo.yml?style=flat-square&labelColor=444444&branch=master&label=GitHub%20CI&logo=github)](https://github.com/Chiloven945/lukosbot-rs/actions/workflows/cargo.yml)
+[![CI](https://github.com/Chiloven945/lukosbot-rs/actions/workflows/cargo.yml/badge.svg?branch=master)](https://github.com/Chiloven945/lukosbot-rs/actions/workflows/cargo.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
 
 </div>
 
-lukosbot-rs is a multifunctional and multiplatform chatbot, using
-the [teloxide](https://github.com/teloxide/teloxide) for Telegram platform,
-the [serenity](https://github.com/serenity-rs/serenity) for Discord platform, and analysing command with
-the [azalea-brigadier](https://github.com/azalea-rs/azalea/tree/main/azalea-brigadier).
+A multiplatform chatbot written in Rust, targeting Telegram and Discord.
 
-This is an experimental project. I'm currently learning Rust and using it to practice my skills, and it is not
-guaranteed to be stable or secure.
-Please use at your own risk.
+This repository currently contains the **application foundation**, not the full bot. It provides a
+typed domain model, a supervised asynchronous runtime, configuration, logging, SQLite state storage,
+a shared HTTP client, and minimal platform adapters. The only end-to-end behaviour is a smoke
+`ping` -> `pong` handler used to prove the message pipeline.
 
-## Supported Commands
+## Status
 
-None of commands are supported, this is just a framework currently.
+| Area                                                                      | State       |
+|---------------------------------------------------------------------------|-------------|
+| Cargo workspace and crate boundaries                                      | done        |
+| Domain model (messages, addresses, media references)                      | done        |
+| Bounded inbound/outbound queues, dispatch, supervision, graceful shutdown | done        |
+| Typed configuration, validation, secret redaction                         | done        |
+| Structured logging (pretty / compact / JSON)                              | done        |
+| SQLite state store and migrations                                         | done        |
+| Shared HTTP client with timeouts and response limits                      | done        |
+| Telegram / Discord text message adapters                                  | minimal     |
+| Command engine, permissions, media pipeline, business features            | not started |
 
-## Planned Features
+The command engine, policy system, media pipeline, and the migration of the JVM feature set are
+separate follow-up plans. See [docs/architecture.md](docs/architecture.md) for the boundaries.
 
-I'm planning to migrate all the feature from the original project lukosBot2, so all the commands will be migrated and
-usable in the future.
+## Layout
 
-## Contributing
+```text
+crates/
+├── domain/               platform-independent types
+├── core/                 ports, dispatch, outbound routing, runtime
+├── infra/                SQLite state store and shared HTTP client
+├── platform-telegram/    teloxide adapter
+├── platform-discord/     serenity adapter
+└── app/                  CLI, configuration, bootstrap, binary
+config/
+└── application.example.toml
+docs/
+├── architecture.md
+├── development.md
+├── operations.md
+└── decisions/            architecture decision records
+```
 
-If you want to contribute to this project, feel free to open an issue or a pull request. Contributions are welcome!
+Dependency direction is strictly one-way: `domain <- core <- infra/platforms <- app`.
+
+## Quick start
+
+```bash
+# Validate the example configuration without connecting anywhere.
+cargo run -p lukosbot-app -- check-config --config config/application.example.toml
+
+# Prepare a local configuration and database.
+cp config/application.example.toml config/application.toml
+cargo run -p lukosbot-app -- migrate
+
+# Run with credentials supplied through the environment.
+LUKOSBOT__PLATFORMS__TELEGRAM__TOKEN='123456:replace-me' \
+  LUKOSBOT__PLATFORMS__TELEGRAM__ENABLED=true \
+  cargo run -p lukosbot-app -- run
+```
+
+Configuration precedence is `CLI > environment > TOML file > defaults`. Nested environment keys use
+`__`, for example `LUKOSBOT__RUNTIME__INBOUND_QUEUE_CAPACITY=128`.
+
+## CLI
+
+```text
+lukosbot [--config PATH] [--log-filter FILTER] <run|check-config|migrate>
+```
+
+- `run` — start the bot and connect enabled platforms.
+- `check-config` — load and validate configuration and print a redacted summary.
+- `migrate` — apply SQLite migrations and exit.
+
+## Development
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-targets --all-features
+```
+
+See [docs/development.md](docs/development.md) for toolchain setup, manual platform testing, and
+troubleshooting.
 
 ## License
 
-This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See the [LICENSE](LICENSE) file
-for details.
-
-This project uses the following third-party libraries. All dependencies are compatible with AGPL-3.0, and their licences
-are respected:
-
-- **anyhow**
-    - Repository: [dtolnay/anyhow](https://github.com/dtolnay/anyhow)
-    - License: [MIT](https://github.com/dtolnay/anyhow/blob/master/LICENSE-MIT)
-      and [Apache-2.0](https://github.com/dtolnay/anyhow/blob/master/LICENSE-APACHE)
-
-- **async-trait**
-    - Repository: [dtolnay/async-trait](https://github.com/dtolnay/async-trait)
-    - License: [MIT](https://github.com/dtolnay/async-trait/blob/master/LICENSE-MIT)
-      and [Apache-2.0](https://github.com/dtolnay/async-trait/blob/master/LICENSE-APACHE)
-
-- **azalea-brigadier**
-    - Repository: [azalea-rs/brigadier](https://github.com/azalea-rs/azalea/tree/main/azalea-brigadier)
-    - License: [MIT](https://github.com/azalea-rs/azalea/blob/main/LICENSE.md)
-
-- **config**
-  - Repository: [rust-cli/config-rs](https://github.com/rust-cli/config-rs)
-  - License: [MIT](https://github.com/rust-cli/config-rs/blob/master/LICENSE-MIT)
-    and [Apache-2.0](https://github.com/rust-cli/config-rs/blob/master/LICENSE-APACHE)
-
-- **regex**
-    - Repository: [rust-lang/regex](https://github.com/rust-lang/regex)
-    - License: [MIT](https://github.com/rust-lang/regex/blob/master/LICENSE-MIT)
-      and [Apache-2.0](https://github.com/rust-lang/regex/blob/master/LICENSE-APACHE)
-
-- **reqwest**
-  - Repository: [seanmonstar/reqwest](https://github.com/seanmonstar/reqwest)
-  - License: [MIT](https://github.com/seanmonstar/reqwest/blob/master/LICENSE-MIT)
-    and [Apache-2.0](https://github.com/seanmonstar/reqwest/blob/master/LICENSE-APACHE)
-
-- **serde**
-    - Repository: [serde-rs/serde](https://github.com/serde-rs/serde)
-    - License: [MIT](https://github.com/serde-rs/serde/blob/master/LICENSE-MIT)
-      and [Apache-2.0](https://github.com/serde-rs/serde/blob/master/LICENSE-APACHE)
-
-- **serde_json**
-  - Repository: [dtolnay/serde-json](https://github.com/dtolnay/serde-yaml)
-  - License: [MIT](https://github.com/dtolnay/serde-json/blob/master/LICENSE-MIT)
-    and [Apache-2.0](https://github.com/dtolnay/serde-json/blob/master/LICENSE-APACHE)
-
-- **serenity**
-    - Repository: [serenity-rs/serenity](https://github.com/serenity-rs/serenity)
-    - License: [ISC](https://github.com/serenity-rs/serenity/blob/current/LICENSE.md)
-
-- **teloxide**
-    - Repository: [teloxide/teloxide](https://github.com/teloxide/teloxide)
-    - License: [MIT](https://github.com/teloxide/teloxide/blob/master/LICENSE)
-
-- **tokio**
-    - Repository: [tokio-rs/tokio](https://github.com/tokio-rs/tokio)
-    - License: [MIT](https://github.com/tokio-rs/tokio/blob/master/LICENSE)
-
-- **toml**
-  - Repository: [toml-rs/toml](https://github.com/toml-rs/toml)
-  - License: [MIT](https://github.com/toml-rs/toml/blob/master/LICENSE-MIT)
-    and [Apache-2.0](https://github.com/toml-rs/toml/blob/master/LICENSE-APACHE)
-
-- **tracing**
-    - Repository: [tokio-rs/tracing](https://github.com/tokio-rs/tracing)
-    - License: [MIT](https://github.com/tokio-rs/tracing/blob/master/LICENSE)
-
-- **tracing-subscriber**
-    - Repository: [tokio-rs/tracing](https://github.com/tokio-rs/tracing)
-    - License: [MIT](https://github.com/tokio-rs/tracing/blob/master/LICENSE)
-
-- **url**
-    - Repository: [servo/rust-url](https://github.com/servo/rust-url)
-    - License: [MIT](https://github.com/servo/rust-url/blob/main/LICENSE-MIT)
-      and [Apache-2.0](https://github.com/servo/rust-url/blob/main/LICENSE-APACHE)
+Apache-2.0. See [LICENSE](LICENSE).

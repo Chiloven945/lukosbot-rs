@@ -1,0 +1,25 @@
+[package]
+name = "lukosbot-platform-telegram"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+lukosbot-core.workspace = true
+lukosbot-domain.workspace = true
+teloxide.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+url.workspace = true
+tokio.workspace = true
