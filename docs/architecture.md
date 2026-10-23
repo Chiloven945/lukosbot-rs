@@ -148,7 +148,8 @@ orphan state.
 ## HTTP and SSRF
 
 `lukosbot_infra::http::HttpClient` centralises timeouts, proxy configuration, the user agent, and
-streamed response size limits. Platform SDKs own their transport: the Discord gateway uses
+streamed response size limits. Platform SDKs own their transport: Telegram builds a teloxide client
+with a long-poll-compatible timeout and the configured proxy, while the Discord gateway uses
 serenity's native-TLS backend so the process does not link a second, EOL Rustls major version.
 Retries are opt-in via `RetryPolicy` and only apply to errors the caller marks as retryable.
 

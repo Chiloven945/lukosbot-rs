@@ -12,13 +12,10 @@ use lukosbot_core::StateStore;
 use lukosbot_infra::storage::SqliteStateStore;
 
 fn main() -> ExitCode {
-    match run() {
-        Ok(code) => code,
-        Err(error) => {
-            eprintln!("error: {error:#}");
-            ExitCode::FAILURE
-        }
-    }
+    run().unwrap_or_else(|error| {
+        eprintln!("error: {error:#}");
+        ExitCode::FAILURE
+    })
 }
 
 fn run() -> anyhow::Result<ExitCode> {
@@ -44,7 +41,7 @@ fn run() -> anyhow::Result<ExitCode> {
         "configuration loaded"
     );
 
-    match cli.command {
+    match cli.command.unwrap_or(Command::Run) {
         Command::CheckConfig => {
             let mut stdout = std::io::stdout().lock();
             write!(stdout, "{}", ConfigSummary(&loaded.config))?;

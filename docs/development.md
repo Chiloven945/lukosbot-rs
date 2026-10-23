@@ -106,6 +106,16 @@ production instance: Telegram permits only one long-polling consumer per token.
    are text prefix commands, not native Discord slash commands.
 5. Confirm ordinary chat text is ignored, then stop with Ctrl-C and confirm a clean exit.
 
+## Telegram troubleshooting
+
+Telegram uses long polling with a 30-second server-side timeout. The teloxide HTTP client must have
+a longer timeout, otherwise every otherwise-correct long poll is aborted by the client and the
+adapter backs off repeatedly. The adapter enforces a client timeout of at least 45 seconds
+regardless of the shared `http.request_timeout_secs` setting.
+
+`http.proxy` is applied to the Telegram HTTP client. SOCKS proxies such as
+`socks5h://127.0.0.1:10808` are supported. The proxy URL is not logged.
+
 ## Debugging
 
 - `--log-filter debug` (or `RUST_LOG=debug`) shows adapter polling, dispatch, and send attempts.

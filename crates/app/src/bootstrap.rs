@@ -85,10 +85,18 @@ pub async fn bootstrap(loaded: LoadedConfig) -> anyhow::Result<Bootstrapped> {
             .telegram
             .token()
             .expect("configuration validation requires a Telegram token");
+        let adapter = lukosbot_platform_telegram::TelegramAdapter::with_http(
+            token,
+            lukosbot_platform_telegram::TelegramHttpSettings {
+                connect_timeout: Duration::from_secs(config.http.connect_timeout_secs),
+                request_timeout: Duration::from_secs(config.http.request_timeout_secs),
+                proxy: config.http.proxy_url().map(str::to_owned),
+            },
+        )
+        .context("building the Telegram HTTP client")?;
+
         builder
-            .add_platform(Arc::new(lukosbot_platform_telegram::TelegramAdapter::new(
-                token,
-            )))
+            .add_platform(Arc::new(adapter))
             .context("registering the Telegram adapter")?
     } else {
         builder

@@ -102,10 +102,11 @@ section. See [config/application.example.toml](config/application.example.toml).
 ## CLI
 
 ```text
-lukosbot [--config PATH] [--log-filter FILTER] <run|check-config|migrate>
+lukosbot [--config PATH] [--log-filter FILTER] [run|check-config|migrate]
 ```
 
-- `run` — start the bot and connect enabled platforms.
+- `run` — start the bot and connect enabled platforms. This is also the default when no subcommand
+  is supplied, so `cargo run` and `lukosbot` start the bot directly.
 - `check-config` — load and validate configuration and print a redacted summary.
 - `migrate` — apply SQLite migrations and exit.
 

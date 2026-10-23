@@ -5,4 +5,4 @@
 mod adapter;
 mod mapping;
 
-pub use adapter::TelegramAdapter;
+pub use adapter::{TelegramAdapter, TelegramHttpSettings};

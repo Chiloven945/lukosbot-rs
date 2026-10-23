@@ -28,8 +28,9 @@ pub struct Cli {
     #[arg(long, global = true, env = "LUKOSBOT_LOG", value_name = "FILTER")]
     pub log_filter: Option<String>,
 
+    /// Subcommand to execute. Omitting it is equivalent to `run`.
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -57,7 +58,7 @@ mod tests {
     #[test]
     fn parses_run_with_default_config_path() {
         let cli = Cli::try_parse_from(["lukosbot", "run"]).unwrap();
-        assert!(matches!(cli.command, Command::Run));
+        assert!(matches!(cli.command, Some(Command::Run)));
         assert_eq!(cli.config, PathBuf::from("config/application.toml"));
     }
 
@@ -73,9 +74,15 @@ mod tests {
         ])
         .unwrap();
 
-        assert!(matches!(cli.command, Command::CheckConfig));
+        assert!(matches!(cli.command, Some(Command::CheckConfig)));
         assert_eq!(cli.config, PathBuf::from("custom.toml"));
         assert_eq!(cli.log_filter.as_deref(), Some("debug"));
+    }
+
+    #[test]
+    fn missing_subcommand_defaults_to_run() {
+        let cli = Cli::try_parse_from(["lukosbot"]).unwrap();
+        assert!(cli.command.is_none());
     }
 
     #[test]

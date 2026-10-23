@@ -3,8 +3,10 @@
 ## Process interface
 
 ```text
-lukosbot [--config PATH] [--log-filter FILTER] <run|check-config|migrate>
+lukosbot [--config PATH] [--log-filter FILTER] [run|check-config|migrate]
 ```
+
+Omitting the subcommand is equivalent to `run`.
 
 Exit codes:
 

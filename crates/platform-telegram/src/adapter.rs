@@ -7,6 +7,8 @@ use lukosbot_core::{InboundSender, PlatformAdapter, PlatformError};
 use lukosbot_domain::{
     ChatAddress, OutboundMessage, OutboundPart, PlatformKind, PlatformMessageId, SentMessage,
 };
+use reqwest012::Proxy;
+use teloxide::net::default_reqwest_settings;
 use teloxide::payloads::GetUpdatesSetters;
 use teloxide::prelude::Requester;
 use teloxide::types::ChatId;
@@ -15,9 +17,28 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 const POLL_TIMEOUT_SECS: u32 = 30;
+const CLIENT_TIMEOUT_MARGIN_SECS: u64 = 15;
 const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 const PLATFORM: PlatformKind = PlatformKind::Telegram;
+
+/// HTTP settings used by the Telegram adapter.
+#[derive(Debug, Clone)]
+pub struct TelegramHttpSettings {
+    pub connect_timeout: Duration,
+    pub request_timeout: Duration,
+    pub proxy: Option<String>,
+}
+
+impl Default for TelegramHttpSettings {
+    fn default() -> Self {
+        Self {
+            connect_timeout: Duration::from_secs(5),
+            request_timeout: Duration::from_secs(20),
+            proxy: None,
+        }
+    }
+}
 
 /// Telegram adapter using explicit long polling.
 ///
@@ -26,14 +47,57 @@ const PLATFORM: PlatformKind = PlatformKind::Telegram;
 /// shutdown semantics explicit. Webhook mode can be added later without changing the port.
 pub struct TelegramAdapter {
     bot: Bot,
+    client_timeout: Duration,
+    proxy_configured: bool,
 }
 
 impl TelegramAdapter {
+    /// Builds an adapter with the default HTTP settings and a long-poll-safe timeout.
     pub fn new(token: impl AsRef<str>) -> Self {
-        Self {
-            bot: Bot::new(token.as_ref()),
-        }
+        Self::with_http(token, TelegramHttpSettings::default())
+            .expect("default Telegram HTTP client must be constructible")
     }
+
+    /// Builds an adapter with explicit proxy and timeout settings.
+    ///
+    /// The client timeout is always greater than the long-poll timeout, otherwise teloxide can
+    /// abort every successful long poll after its own default 17-second client timeout.
+    pub fn with_http(
+        token: impl AsRef<str>,
+        settings: TelegramHttpSettings,
+    ) -> Result<Self, PlatformError> {
+        let client_timeout = effective_client_timeout(settings.request_timeout);
+        let proxy_configured = settings
+            .proxy
+            .as_deref()
+            .is_some_and(|proxy| !proxy.trim().is_empty());
+
+        let mut builder = default_reqwest_settings()
+            .connect_timeout(settings.connect_timeout)
+            .timeout(client_timeout);
+
+        if let Some(proxy) = settings.proxy.filter(|proxy| !proxy.trim().is_empty()) {
+            let proxy =
+                Proxy::all(proxy).map_err(|error| PlatformError::transport(PLATFORM, error))?;
+            builder = builder.proxy(proxy);
+        }
+
+        let client = builder
+            .build()
+            .map_err(|error| PlatformError::transport(PLATFORM, error))?;
+
+        Ok(Self {
+            bot: Bot::with_client(token.as_ref(), client),
+            client_timeout,
+            proxy_configured,
+        })
+    }
+}
+
+fn effective_client_timeout(request_timeout: Duration) -> Duration {
+    request_timeout.max(Duration::from_secs(
+        u64::from(POLL_TIMEOUT_SECS) + CLIENT_TIMEOUT_MARGIN_SECS,
+    ))
 }
 
 #[async_trait]
@@ -47,7 +111,11 @@ impl PlatformAdapter for TelegramAdapter {
         inbound: InboundSender,
         cancel: CancellationToken,
     ) -> Result<(), PlatformError> {
-        debug!("Telegram polling started");
+        debug!(
+            client_timeout = ?self.client_timeout,
+            proxy = self.proxy_configured,
+            "Telegram polling started"
+        );
 
         let mut offset: Option<i32> = None;
         let mut backoff = INITIAL_BACKOFF;
@@ -298,5 +366,45 @@ mod tests {
         };
 
         assert_eq!(next_offset(&update), 42);
+    }
+}
+
+#[cfg(test)]
+mod http_settings_tests {
+    use super::*;
+
+    #[test]
+    fn client_timeout_is_longer_than_long_poll() {
+        let timeout = effective_client_timeout(Duration::from_secs(20));
+        assert!(timeout > Duration::from_secs(u64::from(POLL_TIMEOUT_SECS)));
+        assert_eq!(timeout, Duration::from_secs(45));
+        assert_eq!(
+            effective_client_timeout(Duration::from_secs(60)),
+            Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn invalid_proxy_is_rejected_without_network_io() {
+        let result = TelegramAdapter::with_http(
+            "123:fake-token",
+            TelegramHttpSettings {
+                proxy: Some("socks5h://[".to_owned()),
+                ..TelegramHttpSettings::default()
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn socks_proxy_is_accepted() {
+        let result = TelegramAdapter::with_http(
+            "123:fake-token",
+            TelegramHttpSettings {
+                proxy: Some("socks5h://127.0.0.1:1080".to_owned()),
+                ..TelegramHttpSettings::default()
+            },
+        );
+        assert!(result.is_ok());
     }
 }

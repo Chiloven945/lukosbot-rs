@@ -1778,6 +1778,7 @@ dependencies = [
  "async-trait",
  "lukosbot-core",
  "lukosbot-domain",
+ "reqwest 0.12.28",
  "serde_json",
  "teloxide",
  "tokio",
