@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::time::Duration;
 
+use reqwest::redirect;
 use reqwest::{RequestBuilder, Response, StatusCode};
 use serde::de::DeserializeOwned;
 use thiserror::Error;
@@ -28,6 +29,16 @@ impl Default for HttpSettings {
     }
 }
 
+/// Redirect handling for a client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RedirectMode {
+    /// Follow a bounded number of redirects, matching reqwest's default.
+    #[default]
+    Follow,
+    /// Return the redirect response so the caller can validate each target itself.
+    None,
+}
+
 /// The application-wide HTTP client.
 ///
 /// The client never adds credentials automatically and never retries on its own. Callers that
@@ -40,12 +51,29 @@ pub struct HttpClient {
 
 impl HttpClient {
     pub fn new(settings: HttpSettings) -> Result<Self, HttpError> {
+        Self::new_with_redirect(settings, RedirectMode::Follow)
+    }
+
+    /// Builds a client with an explicit redirect policy.
+    ///
+    /// Only callers with a validated redirect chain (for example Bilibili short links) should use
+    /// [`RedirectMode::None`].
+    pub fn new_with_redirect(
+        settings: HttpSettings,
+        redirect_mode: RedirectMode,
+    ) -> Result<Self, HttpError> {
         // System proxy auto-detection is deliberately disabled: proxy behaviour is owned by
         // application configuration so deployments are reproducible.
+        let redirect_policy = match redirect_mode {
+            RedirectMode::Follow => redirect::Policy::limited(10),
+            RedirectMode::None => redirect::Policy::none(),
+        };
+
         let mut builder = reqwest::Client::builder()
             .connect_timeout(settings.connect_timeout)
             .timeout(settings.request_timeout)
             .user_agent(settings.user_agent)
+            .redirect(redirect_policy)
             .no_proxy();
 
         if let Some(proxy) = settings.proxy.as_deref() {
@@ -66,9 +94,18 @@ impl HttpClient {
         &self.inner
     }
 
+    /// Sends a request and returns the response without judging its status.
+    ///
+    /// The caller must read the body through [`HttpClient::read_limited`] or a bounded equivalent
+    /// when it needs the payload. This entry point exists for APIs whose headers or redirect
+    /// locations carry meaningful state.
+    pub async fn execute(&self, request: RequestBuilder) -> Result<Response, HttpError> {
+        request.send().await.map_err(map_request_error)
+    }
+
     /// Sends a request and rejects non-success status codes with a bounded body snippet.
     pub async fn send(&self, request: RequestBuilder) -> Result<Response, HttpError> {
-        let response = request.send().await.map_err(map_request_error)?;
+        let response = self.execute(request).await?;
         let status = response.status();
 
         if !status.is_success() {

@@ -72,3 +72,28 @@ weather = true
 
 [commands.twenty_four]
 time_limit_secs = 300
+
+[commands.integrations]
+github = true
+bilibili = true
+ip = true
+music = true
+whois = true
+
+[integrations.github]
+# Optional. Empty means anonymous access; rate limits are lower.
+token = ""
+
+[integrations.music.spotify]
+enabled = false
+client_id = ""
+client_secret = ""
+
+[integrations.music.soundcloud]
+enabled = false
+client_id = ""
+
+[integrations.whois]
+connect_timeout_secs = 3
+total_timeout_secs = 8
+max_response_bytes = 65536

@@ -4,8 +4,9 @@
 
 The codebase separates platform SDKs, infrastructure, command parsing, concrete commands, and
 process assembly so that each can be tested without the others. The current command engine covers
-text commands, policy enforcement, persisted state, and core administration; media, service
-scheduling, and third-party integrations remain follow-up work.
+text commands, policy enforcement, persisted state, core administration, and the first set of
+third-party API commands; media, service scheduling, and the remaining JVM business commands remain
+follow-up work.
 
 ## Crates and dependency direction
 
@@ -14,20 +15,24 @@ flowchart TD
     APP["lukosbot-app<br/>CLI, config, bootstrap, shutdown"]
     CORE["lukosbot-core<br/>ports, dispatcher, outbound, runtime"]
     DOMAIN["lukosbot-domain<br/>messages, addresses, media"]
-    INFRA["lukosbot-infra<br/>SQLite, HTTP"]
+    INFRA["lukosbot-infra<br/>SQLite, HTTP/TCP clients"]
+    INTEGRATIONS["lukosbot-integrations<br/>service contracts and models"]
     ENGINE["lukosbot-command-engine<br/>definitions, parsing, registry, help"]
-    COMMANDS["lukosbot-commands<br/>basic commands, 24-point actor"]
+    COMMANDS["lukosbot-commands<br/>basic commands, integrations, 24-point actor"]
     TG["lukosbot-platform-telegram"]
     DC["lukosbot-platform-discord"]
     APP --> COMMANDS
+    APP --> INTEGRATIONS
     APP --> ENGINE
     APP --> CORE
     APP --> INFRA
     APP --> TG
     APP --> DC
+    COMMANDS --> INTEGRATIONS
     COMMANDS --> ENGINE
     COMMANDS --> CORE
     COMMANDS --> DOMAIN
+    INFRA --> INTEGRATIONS
     ENGINE --> CORE
     ENGINE --> DOMAIN
     CORE --> DOMAIN
@@ -43,13 +48,16 @@ Rules:
 
 - `lukosbot-domain` depends on no other project crate and on no platform SDK.
 - `lukosbot-core` defines ports and never imports a database driver, HTTP client, or SDK.
-- `lukosbot-infra` and the platform crates implement core ports.
+- `lukosbot-infra` and the platform crates implement core ports and external-service contracts.
+- `lukosbot-integrations` defines normalised provider models and object-safe async service traits.
+  It depends on no project crate, HTTP client, database, or platform SDK.
 - `lukosbot-command-engine` knows command definitions, parsing, and help rendering, but not platform
   SDKs or concrete business commands.
-- `lukosbot-commands` contains concrete commands and the supervised 24-point actor. It depends on
-  the engine and core, never on Telegram or Discord SDKs.
+- `lukosbot-commands` contains concrete commands, integration command formatting, and the supervised
+  24-point actor. It depends on the engine, core, and integration contracts, never on Telegram,
+  Discord, or `reqwest`.
 - `lukosbot-app` is the only composition root. It builds the command registry, handler, workers,
-  infrastructure, and runtime.
+  external-service implementations, infrastructure, and runtime.
 
 ## Message flow
 
@@ -121,6 +129,24 @@ Workers are spawned through the same `TaskSupervisor` as adapters and the dispat
 worker exit, panic, duplicate names, and names that shadow platform tasks are treated as assembly or
 runtime failures. A worker that ignores cancellation is still bounded by the shared shutdown
 deadline.
+
+## Third-party integrations
+
+`lukosbot-integrations` is the boundary between command behavior and provider protocols:
+
+- `GitHubService`, `BilibiliService`, `IpLookupService`, `MusicService`, and `WhoisService` are
+  object-safe async traits.
+- Provider DTOs, URL construction, authentication, redirects, and TCP I/O live in
+  `lukosbot-infra::integrations` and stay private.
+- Commands receive only `Arc<dyn ...Service>` through `IntegrationCommandServices`; they do not see
+  configuration, credentials, or HTTP clients.
+- `bootstrap` constructs the shared HTTP client, the no-redirect client used by Bilibili short
+  links, provider clients, and the command registry.
+- Every external operation has a bounded budget. Commands await the future directly; they never
+  spawn detached tasks, preserving runtime supervision and shutdown semantics.
+- User-facing errors are stable categories. Provider bodies and credentials are not echoed.
+- Integration reply formatting is pure command-layer code and is capped before reaching the outbound
+  port. See [the behavior matrix](migrations/third-party-api/behavior-matrix.md).
 
 ## State storage
 

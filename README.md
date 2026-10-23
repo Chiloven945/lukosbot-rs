@@ -1,39 +1,37 @@
 # lukosbot-rs
 
-<div align="middle">
-
 [![CI](https://github.com/Chiloven945/lukosbot-rs/actions/workflows/cargo.yml/badge.svg?branch=master)](https://github.com/Chiloven945/lukosbot-rs/actions/workflows/cargo.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
-
-</div>
 
 A multiplatform chatbot written in Rust, targeting Telegram and Discord.
 
 The repository currently contains the application foundation, a tested text command engine, basic
 commands, persisted state services, bot/chat authorization, policy enforcement, `/admin`, `/pref`,
-and an H2 state-import tool. Media, service scheduling, and most JVM business commands remain
+the first third-party API commands (`/github`, `/bilibili`, `/ip`, `/music`, `/whois`), and an H2
+state-import tool. Media, service scheduling, and the remaining JVM business commands remain
 follow-up work.
 
 ## Status
 
-| Area                                                                       | State       |
-|----------------------------------------------------------------------------|-------------|
-| Cargo workspace and crate boundaries                                       | done        |
-| Domain model (messages, addresses, media references)                       | done        |
-| Bounded inbound/outbound queues, dispatch, supervision, graceful shutdown  | done        |
-| Typed configuration, validation, secret redaction                          | done        |
-| Structured logging (pretty / compact / JSON)                               | done        |
-| SQLite state store, metadata/revision, namespace scans and migrations      | done        |
-| Shared HTTP client with timeouts and response limits                       | done        |
-| Telegram / Discord text message adapters                                   | minimal     |
-| Text command engine, aliases, raw/argv parsing, policy-aware text help     | done        |
-| Basic commands (`ping`, `echo`, `coin`, `dice`, `luck`, `24`, `help`, ...) | done        |
-| State definitions, resolution service and TTL cleanup worker               | done        |
-| Bootstrap/dynamic bot admins and platform chat-admin resolution            | done        |
-| Policy rules, command/help enforcement and allowed-value evaluation        | done        |
-| `/admin` and `/pref` command framework                                     | done        |
-| H2 `bot_state` JSONL import                                                | done        |
-| Media pipeline, service scheduler, integrations, business features         | not started |
+| Area                                                                         | State       |
+|------------------------------------------------------------------------------|-------------|
+| Cargo workspace and crate boundaries                                         | done        |
+| Domain model (messages, addresses, media references)                         | done        |
+| Bounded inbound/outbound queues, dispatch, supervision, graceful shutdown    | done        |
+| Typed configuration, validation, secret redaction                            | done        |
+| Structured logging (pretty / compact / JSON)                                 | done        |
+| SQLite state store, metadata/revision, namespace scans and migrations        | done        |
+| Shared HTTP client with timeouts and response limits                         | done        |
+| Telegram / Discord text message adapters                                     | minimal     |
+| Text command engine, aliases, raw/argv parsing, policy-aware text help       | done        |
+| Basic commands (`ping`, `echo`, `coin`, `dice`, `luck`, `24`, `help`, ...)   | done        |
+| State definitions, resolution service and TTL cleanup worker                 | done        |
+| Bootstrap/dynamic bot admins and platform chat-admin resolution              | done        |
+| Policy rules, command/help enforcement and allowed-value evaluation          | done        |
+| `/admin` and `/pref` command framework                                       | done        |
+| Third-party API commands (`/github`, `/bilibili`, `/ip`, `/music`, `/whois`) | done        |
+| H2 `bot_state` JSONL import                                                  | done        |
+| Media pipeline, service scheduler, remaining business features               | not started |
 
 The policy system, media pipeline, and the remaining JVM commands are separate follow-up plans. See
 [docs/architecture.md](docs/architecture.md) and
@@ -45,7 +43,8 @@ The policy system, media pipeline, and the remaining JVM commands are separate f
 crates/
 ├── domain/               platform-independent types
 ├── core/                 ports, dispatch, outbound routing, runtime
-├── infra/                SQLite state store and shared HTTP client
+├── integrations/         external-service contracts and normalized models
+├── infra/                SQLite state store, shared HTTP/TCP clients
 ├── command-engine/       command definitions, parsing, registry, help
 ├── commands/             built-in commands and the 24-point actor
 ├── platform-telegram/    teloxide adapter
@@ -58,6 +57,7 @@ docs/
 ├── development.md
 ├── operations.md
 ├── migrations/           H2 JSONL export/import contract
+│   └── third-party-api/  integration behavior matrix
 ├── command-engine/
 │   └── behavior-matrix.md
 └── decisions/            architecture decision records
@@ -66,7 +66,8 @@ tools/
 ```
 
 Dependency direction is strictly one-way: `domain <- core <- command-engine <- commands <- app`.
-Platform and infrastructure crates depend on core/domain, never on the command engine.
+`lukosbot-integrations` defines service contracts and normalized models; `infra` implements them;
+platform and infrastructure crates depend on core/domain, never on the command engine.
 
 ## Quick start
 
@@ -102,14 +103,22 @@ The default prefix is `/`. Type a command as a normal text message:
 /admin list
 /pref list
 /help
+/github user GitHub
+/bilibili BV1GJ411x7h7 -i
+/ip 1.1.1.1
+/music Never Gonna Give You Up
+/whois example.com
 ```
 
-`/luck` also accepts `/l` and `/jrrp`. `/start` is callable but hidden from help. `/weather` is
-deliberately a placeholder until a weather integration exists. Discord native slash commands are not
-implemented yet; these are text commands on both platforms.
+`/luck` also accepts `/l` and `/jrrp`; `/github` accepts `/gh`; `/bilibili` accepts `/bili`.
+`/start` is callable but hidden from help. `/weather` is deliberately a placeholder until a weather
+integration exists. Discord native slash commands are not implemented yet; these are text commands
+on both platforms.
 
-Command registration, prefix, and basic-command switches live in the `[commands]` configuration
-section. See [config/application.example.toml](config/application.example.toml).
+Command registration, prefix, basic-command switches, and third-party command switches live in the
+`[commands]` configuration section. Credentials and provider settings live under `[integrations]`.
+See [config/application.example.toml](config/application.example.toml) and the
+[third-party behavior matrix](docs/migrations/third-party-api/behavior-matrix.md).
 
 ## CLI
 

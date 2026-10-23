@@ -59,6 +59,27 @@ impl fmt::Display for ConfigSummary<'_> {
         writeln!(f, "policy: rules={}", config.policy.rules.len())?;
         writeln!(
             f,
+            "integrations: github_token={} spotify={} soundcloud={} whois_timeouts={}s/{}s",
+            if config.integrations.github.has_token() {
+                "configured"
+            } else {
+                "none"
+            },
+            if config.integrations.music.spotify.available() {
+                "configured"
+            } else {
+                "unavailable"
+            },
+            if config.integrations.music.soundcloud.available() {
+                "configured"
+            } else {
+                "unavailable"
+            },
+            config.integrations.whois.connect_timeout_secs,
+            config.integrations.whois.total_timeout_secs
+        )?;
+        writeln!(
+            f,
             "commands: prefix={} ping={} echo={} coin={} dice={} luck={} twenty_four={} twenty_four_time_limit={}s weather={} admin={} pref={} service={}",
             config.commands.prefix,
             config.commands.basic.ping,
@@ -72,6 +93,15 @@ impl fmt::Display for ConfigSummary<'_> {
             config.commands.control.admin,
             config.commands.control.pref,
             config.commands.control.service
+        )?;
+        writeln!(
+            f,
+            "integration_commands: github={} bilibili={} ip={} music={} whois={}",
+            config.commands.integrations.github,
+            config.commands.integrations.bilibili,
+            config.commands.integrations.ip,
+            config.commands.integrations.music,
+            config.commands.integrations.whois
         )?;
         Ok(())
     }

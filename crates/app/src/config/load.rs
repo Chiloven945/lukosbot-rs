@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
 
+use secrecy::SecretString;
 use thiserror::Error;
 
 use super::{AppConfig, ENV_PREFIX, ENV_SEPARATOR};
@@ -96,6 +97,12 @@ impl fmt::Display for ConfigIssues {
 
 /// Walks the default configuration file path and returns a helpful error when it does not exist.
 pub fn load(options: LoadOptions) -> Result<LoadedConfig, ConfigError> {
+    let legacy_github_token = options
+        .env
+        .get("GITHUB_TOKEN")
+        .map(|token| token.trim().to_owned())
+        .filter(|token| !token.is_empty());
+
     let mut builder = config::Config::builder();
 
     if options.path.exists() {
@@ -115,6 +122,11 @@ pub fn load(options: LoadOptions) -> Result<LoadedConfig, ConfigError> {
         .try_deserialize::<AppConfig>()?;
 
     let mut config = config;
+    if config.integrations.github.token.is_none()
+        && let Some(token) = legacy_github_token
+    {
+        config.integrations.github.token = Some(SecretString::from(token));
+    }
     if let Some(filter) = options.overrides.log_filter {
         config.logging.filter = filter;
     }

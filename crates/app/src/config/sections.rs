@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
-use super::{PlatformsSection, PolicySection, SecuritySection};
+use super::{IntegrationsSection, PlatformsSection, PolicySection, SecuritySection};
 
 /// Root configuration object.
 #[derive(Debug, Default, Deserialize)]
@@ -18,6 +18,7 @@ pub struct AppConfig {
     pub commands: CommandsSection,
     pub security: SecuritySection,
     pub policy: PolicySection,
+    pub integrations: IntegrationsSection,
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,6 +168,7 @@ pub struct CommandsSection {
     pub basic: BasicCommandSettings,
     pub twenty_four: TwentyFourSettings,
     pub control: ControlCommandSettings,
+    pub integrations: IntegrationCommandSettings,
 }
 
 impl Default for CommandsSection {
@@ -176,6 +178,29 @@ impl Default for CommandsSection {
             basic: BasicCommandSettings::default(),
             twenty_four: TwentyFourSettings::default(),
             control: ControlCommandSettings::default(),
+            integrations: IntegrationCommandSettings::default(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct IntegrationCommandSettings {
+    pub github: bool,
+    pub bilibili: bool,
+    pub ip: bool,
+    pub music: bool,
+    pub whois: bool,
+}
+
+impl Default for IntegrationCommandSettings {
+    fn default() -> Self {
+        Self {
+            github: true,
+            bilibili: true,
+            ip: true,
+            music: true,
+            whois: true,
         }
     }
 }

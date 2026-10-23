@@ -153,6 +153,36 @@ impl AppConfig {
             3_600,
         );
 
+        check_range(
+            &mut issues,
+            "integrations.whois.connect_timeout_secs",
+            self.integrations.whois.connect_timeout_secs,
+            1,
+            30,
+        );
+        check_range(
+            &mut issues,
+            "integrations.whois.total_timeout_secs",
+            self.integrations.whois.total_timeout_secs,
+            1,
+            30,
+        );
+        if self.integrations.whois.total_timeout_secs < self.integrations.whois.connect_timeout_secs
+        {
+            issues.push(
+                "integrations.whois.total_timeout_secs must be greater than or equal to \
+                 integrations.whois.connect_timeout_secs"
+                    .to_owned(),
+            );
+        }
+        check_range(
+            &mut issues,
+            "integrations.whois.max_response_bytes",
+            self.integrations.whois.max_response_bytes,
+            1_024,
+            1_048_576,
+        );
+
         if issues.is_empty() {
             Ok(())
         } else {

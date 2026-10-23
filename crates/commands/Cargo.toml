@@ -17,6 +17,7 @@ fastrand.workspace = true
 lukosbot-command-engine.workspace = true
 lukosbot-core.workspace = true
 lukosbot-domain.workspace = true
+lukosbot-integrations.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tokio.workspace = true
@@ -26,3 +27,4 @@ lukosbot-core = { workspace = true, features = ["test-util"] }
 serde_json.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+url.workspace = true

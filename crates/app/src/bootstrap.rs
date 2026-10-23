@@ -7,14 +7,19 @@ use anyhow::Context;
 
 use lukosbot_command_engine::CommandMessageHandler;
 use lukosbot_commands::{
-    BasicCommandsConfig, ControlCommands, RuntimeInfo, TwentyFourService,
-    build_registry_with_controls,
+    BasicCommandsConfig, ControlCommands, IntegrationCommandServices, RegistryBuildDependencies,
+    RuntimeInfo, ThirdPartyCommandsConfig, TwentyFourService, build_registry_with_dependencies,
 };
 use lukosbot_core::auth::{AuthorizationService, BotAdminService, ChatAdminResolver};
 use lukosbot_core::policy::{CommandPolicy, PolicyEngine};
 use lukosbot_core::state::{StateMaintenanceWorker, StateRegistry, StateService};
 use lukosbot_core::{AppRuntime, PlatformAdapter, RuntimeSettings, StateStore};
-use lukosbot_infra::http::{HttpClient, HttpSettings};
+use lukosbot_infra::http::{HttpClient, HttpSettings, RedirectMode};
+use lukosbot_infra::integrations::bilibili::BilibiliClient;
+use lukosbot_infra::integrations::github::GitHubClient;
+use lukosbot_infra::integrations::ip::IpLookupClient;
+use lukosbot_infra::integrations::music::MusicClient;
+use lukosbot_infra::integrations::whois::{WhoisClient, WhoisSettings};
 use lukosbot_infra::storage::{SqliteSettings, SqliteStateStore};
 
 use crate::config::{AppConfig, LoadedConfig};
@@ -39,6 +44,10 @@ pub async fn bootstrap(loaded: LoadedConfig) -> anyhow::Result<Bootstrapped> {
 
     let http = Arc::new(
         HttpClient::new(http_settings(&config)).context("building the shared HTTP client")?,
+    );
+    let no_redirect_http = Arc::new(
+        HttpClient::new_with_redirect(http_settings(&config), RedirectMode::None)
+            .context("building the no-redirect HTTP client")?,
     );
     tracing::debug!(
         proxy = config.http.proxy_url().is_some(),
@@ -140,9 +149,61 @@ pub async fn bootstrap(loaded: LoadedConfig) -> anyhow::Result<Bootstrapped> {
         authorization: Some(authorization),
         state_service: Some(state_service),
     };
-    let registry =
-        build_registry_with_controls(&command_config, runtime_info, twenty_four_handle, controls)
-            .context("building the command registry")?;
+
+    if config.integrations.music.spotify.enabled && !config.integrations.music.spotify.available() {
+        tracing::warn!(
+            "Spotify is enabled but its client id or secret is missing; the provider is unavailable"
+        );
+    }
+    if config.integrations.music.soundcloud.enabled
+        && !config.integrations.music.soundcloud.available()
+    {
+        tracing::warn!(
+            "SoundCloud is enabled but its client id is missing; the provider is unavailable"
+        );
+    }
+
+    let github_token = config
+        .integrations
+        .github
+        .token()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(|token| secrecy::SecretString::from(token.to_owned()));
+    let github = GitHubClient::new(Arc::clone(&http), github_token);
+    let bilibili = BilibiliClient::new(Arc::clone(&http), Arc::clone(&no_redirect_http));
+    let ip = IpLookupClient::new(Arc::clone(&http));
+    let spotify = config.integrations.music.spotify.credentials();
+    let soundcloud = config.integrations.music.soundcloud.client_id_value();
+    let music = MusicClient::with_http(Arc::clone(&http), spotify, soundcloud);
+    let whois = WhoisClient::new(WhoisSettings {
+        connect_timeout: Duration::from_secs(config.integrations.whois.connect_timeout_secs),
+        total_timeout: Duration::from_secs(config.integrations.whois.total_timeout_secs),
+        max_response_bytes: config.integrations.whois.max_response_bytes,
+    });
+
+    let services = IntegrationCommandServices {
+        github: Some(Arc::new(github)),
+        bilibili: Some(Arc::new(bilibili)),
+        ip: Some(Arc::new(ip)),
+        music: Some(Arc::new(music)),
+        whois: Some(Arc::new(whois)),
+    };
+    let registry = build_registry_with_dependencies(RegistryBuildDependencies {
+        basic: command_config,
+        third_party: ThirdPartyCommandsConfig {
+            github: config.commands.integrations.github,
+            bilibili: config.commands.integrations.bilibili,
+            ip: config.commands.integrations.ip,
+            music: config.commands.integrations.music,
+            whois: config.commands.integrations.whois,
+        },
+        runtime_info,
+        twenty_four: twenty_four_handle,
+        controls,
+        services,
+    })
+    .context("building the command registry")?;
 
     let handler = Arc::new(
         CommandMessageHandler::new(&config.commands.prefix, Arc::new(registry), policy)

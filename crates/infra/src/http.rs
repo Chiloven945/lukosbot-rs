@@ -2,4 +2,4 @@
 
 mod client;
 
-pub use client::{HttpClient, HttpError, HttpSettings, RetryPolicy};
+pub use client::{HttpClient, HttpError, HttpSettings, RedirectMode, RetryPolicy};

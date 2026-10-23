@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use lukosbot_infra::http::{HttpClient, HttpError, HttpSettings, RetryPolicy};
+use lukosbot_infra::http::{HttpClient, HttpError, HttpSettings, RedirectMode, RetryPolicy};
 use serde_json::json;
 use url::Url;
 use wiremock::matchers::{method, path};
@@ -14,6 +14,20 @@ fn client(max_response_bytes: u64, request_timeout: Duration) -> HttpClient {
         user_agent: "LukosBot-tests/0.1".to_owned(),
         proxy: None,
     })
+    .expect("HTTP client builds")
+}
+
+fn client_with_redirect(mode: RedirectMode) -> HttpClient {
+    HttpClient::new_with_redirect(
+        HttpSettings {
+            connect_timeout: Duration::from_secs(2),
+            request_timeout: Duration::from_secs(2),
+            max_response_bytes: 1024,
+            user_agent: "LukosBot-tests/0.1".to_owned(),
+            proxy: None,
+        },
+        mode,
+    )
     .expect("HTTP client builds")
 }
 
@@ -191,4 +205,87 @@ async fn invalid_proxy_configuration_is_rejected() {
     });
 
     assert!(matches!(result, Err(HttpError::Proxy(_))));
+}
+
+#[tokio::test]
+async fn execute_returns_non_success_statuses_for_callers_that_inspect_headers() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/forbidden"))
+        .respond_with(
+            ResponseTemplate::new(403)
+                .insert_header("retry-after", "7")
+                .set_body_string("body"),
+        )
+        .mount(&server)
+        .await;
+
+    let http = client(1024, Duration::from_secs(2));
+    let response = http
+        .execute(http.raw().get(url(&server, "/forbidden")))
+        .await
+        .expect("execute does not reject statuses");
+    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(
+        response
+            .headers()
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok()),
+        Some("7")
+    );
+    assert_eq!(http.read_limited(response).await.unwrap(), b"body");
+}
+
+#[tokio::test]
+async fn redirect_mode_none_returns_the_redirect_response() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/redirect"))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("location", format!("{}/target", server.uri())),
+        )
+        .mount(&server)
+        .await;
+
+    let http = client_with_redirect(RedirectMode::None);
+    let response = http
+        .execute(http.raw().get(url(&server, "/redirect")))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 302);
+    assert_eq!(
+        response
+            .headers()
+            .get("location")
+            .and_then(|value| value.to_str().ok()),
+        Some(format!("{}/target", server.uri()).as_str())
+    );
+}
+
+#[tokio::test]
+async fn redirect_mode_follow_reaches_the_target() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/redirect"))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("location", format!("{}/target", server.uri())),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/target"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("target"))
+        .mount(&server)
+        .await;
+
+    let http = client_with_redirect(RedirectMode::Follow);
+    let response = http
+        .execute(http.raw().get(url(&server, "/redirect")))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 200);
 }

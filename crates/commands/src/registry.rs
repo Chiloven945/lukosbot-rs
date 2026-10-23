@@ -7,8 +7,9 @@ use lukosbot_command_engine::{CommandRegistry, CommandRegistryBuilder, CommandRe
 use crate::basic;
 use crate::basic::random::{RandomSource, ThreadRandom};
 use crate::basic::twenty_four::TwentyFourHandle;
-use crate::config::BasicCommandsConfig;
+use crate::config::{BasicCommandsConfig, ThirdPartyCommandsConfig};
 use crate::control::ControlCommands;
+use crate::integrations::IntegrationCommandServices;
 use crate::runtime_info::RuntimeInfo;
 
 /// A failure while assembling the command registry.
@@ -25,7 +26,17 @@ pub enum CommandBuildError {
     },
 }
 
-/// Builds the built-in command registry without optional control commands.
+/// All inputs needed to build the full command registry.
+pub struct RegistryBuildDependencies {
+    pub basic: BasicCommandsConfig,
+    pub third_party: ThirdPartyCommandsConfig,
+    pub runtime_info: Arc<RuntimeInfo>,
+    pub twenty_four: Option<TwentyFourHandle>,
+    pub controls: ControlCommands,
+    pub services: IntegrationCommandServices,
+}
+
+/// Builds the built-in command registry without optional control or integration commands.
 pub fn build_registry(
     config: &BasicCommandsConfig,
     runtime_info: Arc<RuntimeInfo>,
@@ -40,12 +51,38 @@ pub fn build_registry(
 }
 
 /// Builds the built-in command registry and, when enabled, `/admin` and `/pref`.
+///
+/// Integration commands are deliberately disabled here; use
+/// [`build_registry_with_dependencies`] in the application composition root.
 pub fn build_registry_with_controls(
     config: &BasicCommandsConfig,
     runtime_info: Arc<RuntimeInfo>,
     twenty_four: Option<TwentyFourHandle>,
     controls: ControlCommands,
 ) -> Result<CommandRegistry, CommandBuildError> {
+    build_registry_with_dependencies(RegistryBuildDependencies {
+        basic: *config,
+        third_party: ThirdPartyCommandsConfig::all_disabled(),
+        runtime_info,
+        twenty_four,
+        controls,
+        services: IntegrationCommandServices::default(),
+    })
+}
+
+/// Builds the complete registry, including enabled third-party commands.
+pub fn build_registry_with_dependencies(
+    dependencies: RegistryBuildDependencies,
+) -> Result<CommandRegistry, CommandBuildError> {
+    let RegistryBuildDependencies {
+        basic: config,
+        third_party,
+        runtime_info,
+        twenty_four,
+        controls,
+        services,
+    } = dependencies;
+
     let mut builder = CommandRegistryBuilder::new();
     let random: Arc<dyn RandomSource> = Arc::new(ThreadRandom);
 
@@ -113,6 +150,46 @@ pub fn build_registry_with_controls(
         builder.register(crate::pref::definition(states, authorization))?;
     }
 
+    if third_party.github {
+        let service = services
+            .github
+            .ok_or(CommandBuildError::MissingDependency {
+                command: "github",
+                dependency: "GitHubService",
+            })?;
+        builder.register(crate::integrations::github::definition(service))?;
+    }
+    if third_party.bilibili {
+        let service = services
+            .bilibili
+            .ok_or(CommandBuildError::MissingDependency {
+                command: "bilibili",
+                dependency: "BilibiliService",
+            })?;
+        builder.register(crate::integrations::bilibili::definition(service))?;
+    }
+    if third_party.ip {
+        let service = services.ip.ok_or(CommandBuildError::MissingDependency {
+            command: "ip",
+            dependency: "IpLookupService",
+        })?;
+        builder.register(crate::integrations::ip::definition(service))?;
+    }
+    if third_party.music {
+        let service = services.music.ok_or(CommandBuildError::MissingDependency {
+            command: "music",
+            dependency: "MusicService",
+        })?;
+        builder.register(crate::integrations::music::definition(service))?;
+    }
+    if third_party.whois {
+        let service = services.whois.ok_or(CommandBuildError::MissingDependency {
+            command: "whois",
+            dependency: "WhoisService",
+        })?;
+        builder.register(crate::integrations::whois::definition(service))?;
+    }
+
     builder.register(basic::start::definition())?;
     builder.register(basic::help::definition())?;
 
@@ -175,6 +252,58 @@ mod tests {
             error,
             CommandBuildError::MissingDependency {
                 command: "admin",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn disabled_integration_commands_do_not_require_services() {
+        let registry = build_registry_with_dependencies(RegistryBuildDependencies {
+            basic: BasicCommandsConfig {
+                twenty_four: false,
+                ..BasicCommandsConfig::default()
+            },
+            third_party: ThirdPartyCommandsConfig::all_disabled(),
+            runtime_info: Arc::new(RuntimeInfo::new("test")),
+            twenty_four: None,
+            controls: ControlCommands::default(),
+            services: IntegrationCommandServices::default(),
+        })
+        .unwrap();
+
+        assert!(registry.find("github").is_none());
+        assert!(registry.find("bilibili").is_none());
+        assert!(registry.find("ip").is_none());
+        assert!(registry.find("music").is_none());
+        assert!(registry.find("whois").is_none());
+        assert!(registry.find("help").is_some());
+    }
+
+    #[test]
+    fn enabled_integration_command_requires_a_service() {
+        let error = match build_registry_with_dependencies(RegistryBuildDependencies {
+            basic: BasicCommandsConfig {
+                twenty_four: false,
+                ..BasicCommandsConfig::default()
+            },
+            third_party: ThirdPartyCommandsConfig {
+                github: true,
+                ..ThirdPartyCommandsConfig::all_disabled()
+            },
+            runtime_info: Arc::new(RuntimeInfo::new("test")),
+            twenty_four: None,
+            controls: ControlCommands::default(),
+            services: IntegrationCommandServices::default(),
+        }) {
+            Ok(_) => panic!("github requires a service"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(
+            error,
+            CommandBuildError::MissingDependency {
+                command: "github",
                 ..
             }
         ));

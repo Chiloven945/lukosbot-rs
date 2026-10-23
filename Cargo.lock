@@ -1718,11 +1718,13 @@ dependencies = [
  "lukosbot-command-engine",
  "lukosbot-core",
  "lukosbot-domain",
+ "lukosbot-integrations",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -1757,9 +1759,12 @@ dependencies = [
  "async-trait",
  "chrono",
  "fastrand",
+ "idna",
  "lukosbot-core",
  "lukosbot-domain",
+ "lukosbot-integrations",
  "reqwest 0.13.5",
+ "secrecy 0.10.3",
  "serde",
  "serde_json",
  "sqlx",
@@ -1769,6 +1774,16 @@ dependencies = [
  "tracing",
  "url",
  "wiremock",
+]
+
+[[package]]
+name = "lukosbot-integrations"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "thiserror 2.0.21",
+ "url",
 ]
 
 [[package]]
