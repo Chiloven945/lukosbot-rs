@@ -5,6 +5,7 @@ use thiserror::Error;
 use tracing::{debug, warn};
 
 use lukosbot_core::handler::{HandlerContext, HandlerError, MessageHandler};
+use lukosbot_core::policy::CommandPolicy;
 use lukosbot_domain::{InboundMessage, OutboundMessage};
 
 use crate::args::ParsedArgs;
@@ -34,12 +35,14 @@ pub enum CommandHandlerError {
 pub struct CommandMessageHandler {
     prefix: String,
     registry: Arc<CommandRegistry>,
+    policy: Arc<dyn CommandPolicy>,
 }
 
 impl CommandMessageHandler {
     pub fn new(
         prefix: impl Into<String>,
         registry: Arc<CommandRegistry>,
+        policy: Arc<dyn CommandPolicy>,
     ) -> Result<Self, CommandHandlerError> {
         let prefix = prefix.into();
         if prefix.is_empty() {
@@ -52,7 +55,11 @@ impl CommandMessageHandler {
             return Err(CommandHandlerError::ControlCharacter);
         }
 
-        Ok(Self { prefix, registry })
+        Ok(Self {
+            prefix,
+            registry,
+            policy,
+        })
     }
 
     pub fn prefix(&self) -> &str {
@@ -93,6 +100,25 @@ impl MessageHandler for CommandMessageHandler {
             return Ok(());
         }
 
+        let root_token = line
+            .split_whitespace()
+            .next()
+            .expect("a non-empty command line has a first token");
+        let Some(definition) = self.registry.find(root_token) else {
+            return Ok(());
+        };
+
+        let decision = self.policy.evaluate_command(&message, &definition.name);
+        if !decision.allowed {
+            debug!(
+                command = %definition.name,
+                matched_rules = ?decision.matched_rule_ids,
+                "command denied by policy"
+            );
+            return Self::reply_error(context, &message, policy_denied_message(&definition.name))
+                .await;
+        }
+
         let resolved = match self.registry.resolve(line) {
             Ok(Some(resolved)) => resolved,
             Ok(None) => return Ok(()),
@@ -120,7 +146,13 @@ impl MessageHandler for CommandMessageHandler {
                 .await;
         };
 
-        let command_context = CommandContext::new(&message, context, &self.registry, &self.prefix);
+        let command_context = CommandContext::new(
+            &message,
+            context,
+            &self.registry,
+            &self.prefix,
+            &*self.policy,
+        );
 
         match executor.execute(&command_context, invocation).await {
             Ok(()) => Ok(()),
@@ -184,4 +216,9 @@ fn render_resolve_error(error: &ResolveError, prefix: &str) -> (String, String) 
     };
     let text = format!("命令参数错误：{error}\n\n发送 {prefix}help {path} 查看详细用法。");
     (path, text)
+}
+
+/// The user-facing message for a policy-denied command.
+pub fn policy_denied_message(command_name: &str) -> String {
+    format!("当前聊天不允许使用此命令：{command_name}")
 }

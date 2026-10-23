@@ -1,0 +1,2 @@
+{"record":"header","format":"lukosbot-state-export","version":1,"exported_at":"2026-10-23T00:00:00Z"}
+{"record":"state","scope_type":"GLOBAL","scope_id":"_","namespace":"auth","key":"bot_admins","value":{"TELEGRAM":[7]},"revision":2,"created_at":"2026-10-20T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","expires_at":null}

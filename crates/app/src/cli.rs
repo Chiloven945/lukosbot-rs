@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+use lukosbot_infra::storage::ImportConflictMode;
 
 use crate::config::CliOverrides;
 
@@ -41,6 +43,37 @@ pub enum Command {
     CheckConfig,
     /// Apply database schema migrations and exit.
     Migrate,
+    /// Import a JVM bot_state JSONL export. Dry-run unless --apply is given.
+    ImportState {
+        /// Path to the JSONL export.
+        #[arg(long, value_name = "PATH")]
+        input: PathBuf,
+
+        /// Write records to SQLite. Without this flag the command is a dry-run.
+        #[arg(long)]
+        apply: bool,
+
+        /// How to handle records whose key already exists in the target database.
+        #[arg(long, value_enum, default_value = "fail")]
+        on_conflict: ConflictMode,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ConflictMode {
+    Fail,
+    Skip,
+    Replace,
+}
+
+impl From<ConflictMode> for ImportConflictMode {
+    fn from(value: ConflictMode) -> Self {
+        match value {
+            ConflictMode::Fail => Self::Fail,
+            ConflictMode::Skip => Self::Skip,
+            ConflictMode::Replace => Self::Replace,
+        }
+    }
 }
 
 impl Cli {
@@ -88,5 +121,44 @@ mod tests {
     #[test]
     fn rejects_unknown_subcommands() {
         assert!(Cli::try_parse_from(["lukosbot", "unknown"]).is_err());
+    }
+
+    #[test]
+    fn parses_dry_run_import_by_default() {
+        let cli =
+            Cli::try_parse_from(["lukosbot", "import-state", "--input", "state.jsonl"]).unwrap();
+        let Some(Command::ImportState {
+            input,
+            apply,
+            on_conflict,
+        }) = cli.command
+        else {
+            panic!("expected import-state");
+        };
+        assert_eq!(input, PathBuf::from("state.jsonl"));
+        assert!(!apply);
+        assert_eq!(on_conflict, ConflictMode::Fail);
+    }
+
+    #[test]
+    fn parses_apply_import_with_conflict_mode() {
+        let cli = Cli::try_parse_from([
+            "lukosbot",
+            "import-state",
+            "--input",
+            "state.jsonl",
+            "--apply",
+            "--on-conflict",
+            "replace",
+        ])
+        .unwrap();
+        let Some(Command::ImportState {
+            apply, on_conflict, ..
+        }) = cli.command
+        else {
+            panic!("expected import-state");
+        };
+        assert!(apply);
+        assert_eq!(on_conflict, ConflictMode::Replace);
     }
 }

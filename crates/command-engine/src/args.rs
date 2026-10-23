@@ -104,7 +104,7 @@ impl Validator {
     }
 
     pub fn validate(&self, value: &ArgValue) -> Result<(), String> {
-        (self.0)(value)
+        self.0(value)
     }
 }
 

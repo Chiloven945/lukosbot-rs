@@ -25,7 +25,7 @@ pub use error::{
     CommandError, CommandNameError, CommandParseError, CommandRegistryError, ResolveError,
 };
 pub use executor::CommandExecutor;
-pub use handler::{CommandHandlerError, CommandMessageHandler};
+pub use handler::{CommandHandlerError, CommandMessageHandler, policy_denied_message};
 pub use invocation::CommandInvocation;
 pub use lexer::{LexError, Token};
 pub use name::CommandName;

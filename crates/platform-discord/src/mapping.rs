@@ -5,8 +5,8 @@
 use chrono::{DateTime, Utc};
 use lukosbot_core::PlatformError;
 use lukosbot_domain::{
-    ChatAddress, ChatKind, InboundMessage, InboundPart, MediaRef, MediaSource, PlatformChatId,
-    PlatformKind, PlatformMessageId, PlatformUserId, Sender,
+    ChatAddress, ChatKind, InboundMessage, InboundPart, MediaRef, MediaSource, MessageContext,
+    PlatformChatId, PlatformKind, PlatformMessageId, PlatformUserId, Sender,
 };
 use serenity::model::channel::Message;
 use url::Url;
@@ -16,6 +16,7 @@ const PLATFORM: PlatformKind = PlatformKind::Discord;
 pub(crate) fn map_message(
     message: &Message,
     received_at: DateTime<Utc>,
+    nsfw: Option<bool>,
 ) -> Result<Option<InboundMessage>, PlatformError> {
     if message.author.bot {
         return Ok(None);
@@ -88,6 +89,7 @@ pub(crate) fn map_message(
         received_at,
         parts,
         reply_to,
+        context: MessageContext::new(nsfw),
     }))
 }
 
@@ -159,7 +161,7 @@ mod tests {
 
     #[test]
     fn maps_guild_message() {
-        let message = map_message(&parse(message_value("hello")), Utc::now())
+        let message = map_message(&parse(message_value("hello")), Utc::now(), Some(false))
             .unwrap()
             .unwrap();
 
@@ -174,6 +176,16 @@ mod tests {
             Some("10")
         );
         assert_eq!(message.text_parts().collect::<Vec<_>>(), vec!["hello"]);
+        assert_eq!(message.context.nsfw, Some(false));
+    }
+
+    #[test]
+    fn maps_unknown_nsfw_context() {
+        let message = map_message(&parse(message_value("hello")), Utc::now(), None)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(message.context.nsfw, None);
     }
 
     #[test]
@@ -181,7 +193,9 @@ mod tests {
         let mut value = message_value("hello");
         value.as_object_mut().unwrap().remove("guild_id");
 
-        let message = map_message(&parse(value), Utc::now()).unwrap().unwrap();
+        let message = map_message(&parse(value), Utc::now(), None)
+            .unwrap()
+            .unwrap();
         assert_eq!(message.address.kind, ChatKind::Private);
     }
 
@@ -190,7 +204,11 @@ mod tests {
         let mut value = message_value("hello");
         value["author"]["bot"] = json!(true);
 
-        assert!(map_message(&parse(value), Utc::now()).unwrap().is_none());
+        assert!(
+            map_message(&parse(value), Utc::now(), None)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -203,7 +221,9 @@ mod tests {
             128,
         )]);
 
-        let message = map_message(&parse(value), Utc::now()).unwrap().unwrap();
+        let message = map_message(&parse(value), Utc::now(), None)
+            .unwrap()
+            .unwrap();
 
         assert_eq!(message.parts.len(), 2);
         assert_eq!(message.text_parts().collect::<Vec<_>>(), vec!["look"]);
@@ -228,7 +248,9 @@ mod tests {
             256,
         )]);
 
-        let message = map_message(&parse(value), Utc::now()).unwrap().unwrap();
+        let message = map_message(&parse(value), Utc::now(), None)
+            .unwrap()
+            .unwrap();
         assert!(matches!(message.parts[0], InboundPart::File(_)));
     }
 
@@ -237,7 +259,9 @@ mod tests {
         let mut value = message_value("reply");
         value["referenced_message"] = referenced_message();
 
-        let message = map_message(&parse(value), Utc::now()).unwrap().unwrap();
+        let message = map_message(&parse(value), Utc::now(), None)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             message.reply_to.as_ref().map(PlatformMessageId::as_str),
             Some("9")

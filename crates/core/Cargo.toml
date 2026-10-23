@@ -17,6 +17,7 @@ test-util = []
 async-trait.workspace = true
 chrono.workspace = true
 lukosbot-domain.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -28,4 +29,16 @@ tokio.workspace = true
 
 [[test]]
 name = "runtime"
+required-features = ["test-util"]
+
+[[test]]
+name = "state_service"
+required-features = ["test-util"]
+
+[[test]]
+name = "authorization"
+required-features = ["test-util"]
+
+[[test]]
+name = "policy"
 required-features = ["test-util"]

@@ -19,8 +19,8 @@ use lukosbot_domain::{
 };
 
 use crate::ports::{
-    InboundSender, PlatformAdapter, PlatformError, StateKey, StateStore, StateStoreError,
-    VALUE_VERSION, VersionedValue,
+    InboundSender, PlatformAdapter, PlatformError, SCHEMA_VERSION, StateEntry, StateKey,
+    StateScope, StateScopeKind, StateStore, StateStoreError, VersionedValue,
 };
 
 /// Behaviour injected into a [`RecordingAdapter`].
@@ -222,21 +222,95 @@ impl StateStore for MemoryStateStore {
         value: Value,
         expires_at: Option<chrono::DateTime<Utc>>,
     ) -> Result<(), StateStoreError> {
-        self.entries.write().await.insert(
-            key,
-            VersionedValue {
-                value,
-                version: VALUE_VERSION,
-                updated_at: Utc::now(),
-                expires_at,
-            },
-        );
+        let now = Utc::now();
+        let mut entries = self.entries.write().await;
+        match entries.entry(key) {
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                let existing = entry.get_mut();
+                existing.value = value;
+                existing.schema_version = SCHEMA_VERSION;
+                existing.revision = existing.revision.saturating_add(1);
+                existing.updated_at = now;
+                existing.expires_at = expires_at;
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(VersionedValue {
+                    value,
+                    schema_version: SCHEMA_VERSION,
+                    revision: 0,
+                    created_at: now,
+                    updated_at: now,
+                    expires_at,
+                });
+            }
+        }
         Ok(())
     }
 
     async fn delete(&self, key: &StateKey) -> Result<(), StateStoreError> {
         self.entries.write().await.remove(key);
         Ok(())
+    }
+
+    async fn list_namespace(
+        &self,
+        scope: &StateScope,
+        namespace: &str,
+    ) -> Result<Vec<StateEntry>, StateStoreError> {
+        StateKey::validate_namespace(namespace)?;
+        let now = Utc::now();
+        let entries = self.entries.read().await;
+        let mut values: Vec<StateEntry> = entries
+            .iter()
+            .filter(|(key, value)| {
+                &key.scope == scope
+                    && key.namespace == namespace
+                    && value.expires_at.is_none_or(|expires_at| expires_at > now)
+            })
+            .map(|(key, value)| StateEntry {
+                key: key.clone(),
+                value: value.clone(),
+            })
+            .collect();
+        values.sort_by(|left, right| left.key.key.cmp(&right.key.key));
+        Ok(values)
+    }
+
+    async fn scan_namespace(
+        &self,
+        scope_kind: StateScopeKind,
+        namespace: &str,
+    ) -> Result<Vec<StateEntry>, StateStoreError> {
+        StateKey::validate_namespace(namespace)?;
+        let now = Utc::now();
+        let entries = self.entries.read().await;
+        let mut values: Vec<StateEntry> = entries
+            .iter()
+            .filter(|(key, value)| {
+                key.scope.kind() == scope_kind
+                    && key.namespace == namespace
+                    && value.expires_at.is_none_or(|expires_at| expires_at > now)
+            })
+            .map(|(key, value)| StateEntry {
+                key: key.clone(),
+                value: value.clone(),
+            })
+            .collect();
+        values.sort_by(|left, right| {
+            let left_platform = left.key.scope.platform().map_or("", PlatformKind::as_str);
+            let right_platform = right.key.scope.platform().map_or("", PlatformKind::as_str);
+            left_platform
+                .cmp(right_platform)
+                .then_with(|| {
+                    left.key
+                        .scope
+                        .scope_id()
+                        .unwrap_or("")
+                        .cmp(right.key.scope.scope_id().unwrap_or(""))
+                })
+                .then_with(|| left.key.key.cmp(&right.key.key))
+        });
+        Ok(values)
     }
 
     async fn delete_expired(&self, now: chrono::DateTime<Utc>) -> Result<u64, StateStoreError> {
@@ -273,6 +347,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn memory_store_lists_and_scans_namespaces() {
+        let store = MemoryStateStore::new();
+        let chat_scope = StateScope::Chat {
+            platform: PlatformKind::Telegram,
+            chat_id: lukosbot_domain::PlatformChatId::new("100").unwrap(),
+        };
+        let user_scope = StateScope::user(
+            PlatformKind::Telegram,
+            lukosbot_domain::PlatformUserId::new("7").unwrap(),
+        );
+
+        store
+            .put(
+                StateKey::new(chat_scope.clone(), "service", "zeta").unwrap(),
+                Value::from(1),
+                None,
+            )
+            .await
+            .unwrap();
+        store
+            .put(
+                StateKey::new(chat_scope.clone(), "service", "alpha").unwrap(),
+                Value::from(2),
+                None,
+            )
+            .await
+            .unwrap();
+        store
+            .put(
+                StateKey::new(user_scope, "service", "user").unwrap(),
+                Value::from(3),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let listed = store.list_namespace(&chat_scope, "service").await.unwrap();
+        assert_eq!(
+            listed
+                .iter()
+                .map(|entry| entry.key.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "zeta"]
+        );
+
+        let scanned = store
+            .scan_namespace(StateScopeKind::Chat, "service")
+            .await
+            .unwrap();
+        assert_eq!(scanned.len(), 2);
+        assert!(
+            scanned
+                .iter()
+                .all(|entry| entry.key.scope.kind() == StateScopeKind::Chat)
+        );
+    }
+
+    #[tokio::test]
     async fn memory_store_round_trips_values() {
         let store = MemoryStateStore::new();
         let key = StateKey::new(StateScope::Global, "test", "value").unwrap();
@@ -284,7 +416,17 @@ mod tests {
         let stored = store.get(&key).await.unwrap().unwrap();
 
         assert_eq!(stored.value, Value::from("v"));
-        assert_eq!(stored.version, VALUE_VERSION);
+        assert_eq!(stored.schema_version, SCHEMA_VERSION);
+        assert_eq!(stored.revision, 0);
+
+        store
+            .put(key.clone(), Value::from("w"), None)
+            .await
+            .unwrap();
+        let updated = store.get(&key).await.unwrap().unwrap();
+        assert_eq!(updated.value, Value::from("w"));
+        assert_eq!(updated.revision, 1);
+        assert_eq!(updated.created_at, stored.created_at);
 
         store.delete(&key).await.unwrap();
         assert!(store.get(&key).await.unwrap().is_none());

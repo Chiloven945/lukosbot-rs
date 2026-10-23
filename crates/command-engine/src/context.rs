@@ -1,9 +1,11 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
 use lukosbot_core::handler::HandlerContext;
 use lukosbot_core::messaging::outbound::SendError;
+use lukosbot_core::policy::CommandPolicy;
 use lukosbot_core::ports::StateStore;
 use lukosbot_domain::{ChatAddress, InboundMessage, OutboundMessage, Sender, SentMessage};
 
@@ -18,6 +20,7 @@ pub struct CommandContext<'a> {
     handler: &'a HandlerContext,
     registry: &'a CommandRegistry,
     prefix: &'a str,
+    policy: &'a dyn CommandPolicy,
 }
 
 impl<'a> CommandContext<'a> {
@@ -26,12 +29,14 @@ impl<'a> CommandContext<'a> {
         handler: &'a HandlerContext,
         registry: &'a CommandRegistry,
         prefix: &'a str,
+        policy: &'a dyn CommandPolicy,
     ) -> Self {
         Self {
             message,
             handler,
             registry,
             prefix,
+            policy,
         }
     }
 
@@ -61,6 +66,16 @@ impl<'a> CommandContext<'a> {
 
     pub fn cancellation(&self) -> &CancellationToken {
         self.handler.cancel()
+    }
+
+    /// Returns whether the current message context permits a command.
+    pub fn is_command_allowed(&self, command_name: &str) -> bool {
+        self.policy.is_command_allowed(self.message, command_name)
+    }
+
+    /// Returns the effective allowed values for a policy key in this message context.
+    pub fn allowed_values(&self, key: &str, defaults: Option<&[String]>) -> BTreeSet<String> {
+        self.policy.allowed_values(self.message, key, defaults)
     }
 
     /// Sends a text reply to the chat that produced the current message.

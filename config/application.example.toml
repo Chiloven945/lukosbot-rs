@@ -27,6 +27,7 @@ sqlite_path = "./data/lukosbot.sqlite3"
 busy_timeout_ms = 5000
 max_connections = 5
 create_parent_dirs = true
+expiry_cleanup_interval_secs = 3600
 
 [platforms.telegram]
 enabled = false
@@ -36,8 +37,29 @@ token = ""
 enabled = false
 token = ""
 
+[security.bootstrap_bot_admins]
+telegram = []
+discord = []
+
+[[policy.rules]]
+id = "example-telegram-public-ratings"
+priority = 100
+disable_commands = ["kemono"]
+
+[policy.rules.when]
+platform = "telegram"
+private_chat = false
+
+[policy.rules.allow_values]
+"[e621.rating]" = ["s", "q"]
+
 [commands]
 prefix = "/"
+
+[commands.control]
+admin = true
+pref = true
+service = true
 
 [commands.basic]
 ping = true

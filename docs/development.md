@@ -33,6 +33,9 @@ cargo run -p lukosbot-app -- check-config
 
 # Apply or re-apply schema migrations.
 cargo run -p lukosbot-app -- migrate
+
+# Dry-run a legacy state export. Add --apply to write it.
+cargo run -p lukosbot-app -- import-state --input bot-state.jsonl
 ```
 
 ## Checks
@@ -42,11 +45,29 @@ cargo fmt --all -- --check
 cargo check --workspace --all-targets --all-features
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-targets --all-features
+./scripts/check-file-sizes.sh
 
 # Optional platform builds
 cargo check --workspace --no-default-features --all-targets
 cargo test --workspace --all-targets --all-features
 ```
+
+## File size rule
+
+Hand-written source and documentation files are kept small enough to review:
+
+- More than **500 lines** triggers a split review. The author should split the file by
+  responsibility or explain in the change why it remains one cohesive unit.
+- More than **700 lines** is a hard failure and must be split before merge.
+- Splitting is by responsibility and change axis, not by halving the file. Do not create
+  `foo_part1.rs` / `foo_part2.rs`.
+- Preserve the public API through parent-module re-exports when moving items into submodules.
+- Tests follow the same rule and should be split by scenario, with shared helpers in a support
+  module.
+- Generated code, lock files, third-party code, and large fixtures/data files are excluded.
+
+The check covers tracked `.rs`, `.java`, `.sh`, `.toml`, `.sql`, and `.md` files. It fails on files
+over 700 lines and reports warnings between 501 and 700 lines.
 
 Core runtime tests require the `test-util` feature:
 
@@ -56,17 +77,21 @@ cargo test -p lukosbot-core --features test-util
 
 ## Test strategy
 
-| Layer                           | Location                                              | External services |
-|---------------------------------|-------------------------------------------------------|-------------------|
-| Domain                          | inline unit tests                                     | no                |
-| Configuration / CLI / telemetry | `crates/app`                                          | no                |
-| Runtime lifecycle               | `crates/core/tests/runtime.rs` with `test-util` fakes | no                |
-| SQLite                          | `crates/infra/tests/storage.rs` with temp files       | no                |
-| HTTP                            | `crates/infra/tests/http.rs` with `wiremock`          | no                |
-| Platform mapping                | JSON fixtures in each adapter                         | no                |
-| Command engine                  | `crates/command-engine/tests/engine.rs`               | no                |
-| Built-in commands / 24 actor    | `crates/commands` inline and e2e tests                | no                |
-| Manual end-to-end               | dedicated test bot                                    | yes               |
+| Layer                           | Location                                            | External services |
+|---------------------------------|-----------------------------------------------------|-------------------|
+| Domain                          | inline unit tests                                   | no                |
+| Configuration / CLI / telemetry | `crates/app`                                        | no                |
+| Runtime lifecycle               | `crates/core/tests/runtime/` with `test-util` fakes | no                |
+| State definitions / resolution  | `crates/core/tests/state_service.rs`                | no                |
+| Authorization                   | `crates/core/tests/authorization.rs`                | no                |
+| Policy engine                   | `crates/core/tests/policy.rs`                       | no                |
+| SQLite                          | `crates/infra/tests/storage.rs` with temp files     | no                |
+| HTTP                            | `crates/infra/tests/http.rs` with `wiremock`        | no                |
+| H2 JSONL importer               | `crates/infra/tests/import.rs` with temp files      | no                |
+| Platform mapping/admin cache    | JSON fixtures in each adapter                       | no                |
+| Command engine / policy gate    | `crates/command-engine/tests/{engine,policy}.rs`    | no                |
+| Built-in / control commands     | `crates/commands` inline, e2e and control tests     | no                |
+| Manual end-to-end               | dedicated test bot                                  | yes               |
 
 Never commit real tokens or production data. Do not run a test bot against the same token as a
 production instance: Telegram permits only one long-polling consumer per token.

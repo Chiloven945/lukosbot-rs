@@ -268,6 +268,21 @@ fn process_positionals(
 
     while spec_index < specs.len() && position_index < raw_positionals.len() {
         let spec = &specs[spec_index];
+
+        // An optional positional before required positionals is skipped when the remaining
+        // tokens are only enough to satisfy those required arguments. This makes
+        // `[scope?] <state>` accept both `get <state>` and `get <scope> <state>`.
+        if !spec.required && !spec.greedy {
+            let required_after = specs[spec_index + 1..]
+                .iter()
+                .filter(|later| later.required)
+                .count();
+            if raw_positionals.len() - position_index <= required_after {
+                spec_index += 1;
+                continue;
+            }
+        }
+
         if spec.greedy {
             let joined = raw_positionals[position_index..].join(" ");
             let value = convert_positional(spec, &joined)?;
@@ -352,5 +367,42 @@ fn store_option(values: &mut HashMap<String, ArgValue>, option: &OptionSpec, val
         append_list(values, &option.canonical_name, vec![value]);
     } else {
         values.insert(option.canonical_name.clone(), value);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer;
+
+    fn pref_get_spec() -> ArgsSpec {
+        ArgsSpec {
+            positionals: vec![
+                PositionalSpec::new("scope", ArgType::String).optional(),
+                PositionalSpec::new("state", ArgType::String),
+            ],
+            options: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn optional_scope_is_skipped_when_only_state_is_present() {
+        let tokens = lexer::split("lang").unwrap();
+        let parsed = parse_args(&tokens, &pref_get_spec()).unwrap();
+
+        assert!(parsed.get_opt::<String>("scope").unwrap().is_none());
+        assert_eq!(parsed.get::<String>("state").unwrap(), "lang");
+    }
+
+    #[test]
+    fn optional_scope_is_consumed_when_both_values_are_present() {
+        let tokens = lexer::split("user lang").unwrap();
+        let parsed = parse_args(&tokens, &pref_get_spec()).unwrap();
+
+        assert_eq!(
+            parsed.get_opt::<String>("scope").unwrap().as_deref(),
+            Some("user")
+        );
+        assert_eq!(parsed.get::<String>("state").unwrap(), "lang");
     }
 }

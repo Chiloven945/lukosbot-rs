@@ -1,6 +1,6 @@
 # ADR-0003: State storage
 
-- Status: accepted
+- Status: accepted; extended by ADR-0005
 - Date: 2026-10-23
 
 ## Context
@@ -57,3 +57,6 @@ is exercised against real temporary SQLite files.
   permissions belong to later plans and can be layered on this port.
 - Importing the H2 data and switching production traffic is a separate migration project with its
   own validation and rollback plan.
+
+ADR-0005 extends this design with namespace scans, separate schema/revision metadata, and a
+supervised expiry-cleanup worker.

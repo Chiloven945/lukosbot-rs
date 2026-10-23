@@ -3,14 +3,16 @@
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
+use lukosbot_core::auth::{ChatAdminLookupError, ChatAdminResolver};
 use lukosbot_core::{InboundSender, PlatformAdapter, PlatformError};
 use lukosbot_domain::{
-    ChatAddress, OutboundMessage, OutboundPart, PlatformKind, PlatformMessageId, SentMessage,
+    ChatAddress, ChatKind, InboundMessage, OutboundMessage, OutboundPart, PlatformKind,
+    PlatformMessageId, SentMessage,
 };
 use secrecy::{ExposeSecret, SecretString};
 use serenity::all::{
-    ChannelId, Client, Context, CreateMessage, EventHandler, GatewayIntents, Http, Message,
-    ShardManager,
+    ChannelId, Client, Context, CreateMessage, EventHandler, GatewayIntents, GuildId, Http,
+    Message, ShardManager,
 };
 use serenity::async_trait as serenity_async_trait;
 use tokio_util::sync::CancellationToken;
@@ -28,6 +30,7 @@ pub struct DiscordAdapter {
     http: Arc<Http>,
     intents: GatewayIntents,
     shard_manager: OnceLock<Arc<ShardManager>>,
+    permission_cache: Arc<crate::admin::DiscordPermissionCache>,
 }
 
 impl DiscordAdapter {
@@ -42,6 +45,7 @@ impl DiscordAdapter {
                 | GatewayIntents::DIRECT_MESSAGES
                 | GatewayIntents::MESSAGE_CONTENT,
             shard_manager: OnceLock::new(),
+            permission_cache: Arc::new(crate::admin::DiscordPermissionCache::default()),
         }
     }
 }
@@ -59,7 +63,10 @@ impl PlatformAdapter for DiscordAdapter {
     ) -> Result<(), PlatformError> {
         debug!("Discord gateway starting");
 
-        let handler = GatewayHandler { inbound };
+        let handler = GatewayHandler {
+            inbound,
+            permissions: Arc::clone(&self.permission_cache),
+        };
         let mut client = Client::builder(self.token.expose_secret(), self.intents)
             .event_handler(handler)
             .await
@@ -136,12 +143,39 @@ impl PlatformAdapter for DiscordAdapter {
 
 struct GatewayHandler {
     inbound: InboundSender,
+    permissions: Arc<crate::admin::DiscordPermissionCache>,
 }
 
 #[serenity_async_trait]
 impl EventHandler for GatewayHandler {
-    async fn message(&self, _context: Context, message: Message) {
-        match crate::mapping::map_message(&message, chrono::Utc::now()) {
+    async fn message(&self, context: Context, message: Message) {
+        let nsfw = if let Some(guild_id) = message.guild_id {
+            context.cache.guild(guild_id).and_then(|guild| {
+                guild
+                    .channels
+                    .get(&message.channel_id)
+                    .map(|channel| channel.nsfw)
+            })
+        } else {
+            Some(false)
+        };
+
+        if let Some(guild_id) = message.guild_id
+            && let Some(chat_admin) = chat_admin_snapshot(&context, &message, guild_id)
+        {
+            self.permissions
+                .put(
+                    crate::admin::PermissionCacheKey::new(
+                        PLATFORM,
+                        message.channel_id.get(),
+                        message.author.id.get(),
+                    ),
+                    chat_admin,
+                )
+                .await;
+        }
+
+        match crate::mapping::map_message(&message, chrono::Utc::now(), nsfw) {
             Ok(Some(message)) => {
                 if self.inbound.send(message).await.is_err() {
                     warn!("inbound queue is closed; Discord message dropped");
@@ -152,6 +186,50 @@ impl EventHandler for GatewayHandler {
                 warn!(%error, "skipping an unmappable Discord message");
             }
         }
+    }
+}
+
+fn chat_admin_snapshot(context: &Context, message: &Message, guild_id: GuildId) -> Option<bool> {
+    let guild = context.cache.guild(guild_id)?;
+    let channel = guild.channels.get(&message.channel_id)?;
+    let member = guild.members.get(&message.author.id)?;
+    Some(crate::admin::is_chat_admin_permissions(
+        guild.user_permissions_in(channel, member),
+    ))
+}
+
+#[async_trait]
+impl ChatAdminResolver for DiscordAdapter {
+    fn supports(&self, platform: PlatformKind) -> bool {
+        platform == PLATFORM
+    }
+
+    async fn is_chat_admin(&self, message: &InboundMessage) -> Result<bool, ChatAdminLookupError> {
+        if !matches!(
+            message.address.kind,
+            ChatKind::Group | ChatKind::Supergroup | ChatKind::Channel
+        ) {
+            return Ok(false);
+        }
+
+        let channel_id = message
+            .address
+            .chat_id
+            .as_str()
+            .parse::<u64>()
+            .map_err(|error| {
+                ChatAdminLookupError::InvalidIdentity(format!("channel id: {error}"))
+            })?;
+        let user_id =
+            message.sender.id.as_str().parse::<u64>().map_err(|error| {
+                ChatAdminLookupError::InvalidIdentity(format!("user id: {error}"))
+            })?;
+
+        let key = crate::admin::PermissionCacheKey::new(PLATFORM, channel_id, user_id);
+        self.permission_cache
+            .get(&key)
+            .await
+            .ok_or(ChatAdminLookupError::Unavailable)
     }
 }
 

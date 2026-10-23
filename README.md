@@ -9,9 +9,10 @@
 
 A multiplatform chatbot written in Rust, targeting Telegram and Discord.
 
-The repository currently contains the application foundation plus a tested text command engine and
-the first set of basic commands. It does not yet include the policy system, media pipeline, or the
-full JVM feature set.
+The repository currently contains the application foundation, a tested text command engine, basic
+commands, persisted state services, bot/chat authorization, policy enforcement, `/admin`, `/pref`,
+and an H2 state-import tool. Media, service scheduling, and most JVM business commands remain
+follow-up work.
 
 ## Status
 
@@ -22,12 +23,17 @@ full JVM feature set.
 | Bounded inbound/outbound queues, dispatch, supervision, graceful shutdown  | done        |
 | Typed configuration, validation, secret redaction                          | done        |
 | Structured logging (pretty / compact / JSON)                               | done        |
-| SQLite state store and migrations                                          | done        |
+| SQLite state store, metadata/revision, namespace scans and migrations      | done        |
 | Shared HTTP client with timeouts and response limits                       | done        |
 | Telegram / Discord text message adapters                                   | minimal     |
-| Text command engine, aliases, raw/argv parsing, text help                  | done        |
+| Text command engine, aliases, raw/argv parsing, policy-aware text help     | done        |
 | Basic commands (`ping`, `echo`, `coin`, `dice`, `luck`, `24`, `help`, ...) | done        |
-| Permissions, media pipeline, integrations, business features               | not started |
+| State definitions, resolution service and TTL cleanup worker               | done        |
+| Bootstrap/dynamic bot admins and platform chat-admin resolution            | done        |
+| Policy rules, command/help enforcement and allowed-value evaluation        | done        |
+| `/admin` and `/pref` command framework                                     | done        |
+| H2 `bot_state` JSONL import                                                | done        |
+| Media pipeline, service scheduler, integrations, business features         | not started |
 
 The policy system, media pipeline, and the remaining JVM commands are separate follow-up plans. See
 [docs/architecture.md](docs/architecture.md) and
@@ -51,9 +57,12 @@ docs/
 ├── architecture.md
 ├── development.md
 ├── operations.md
+├── migrations/           H2 JSONL export/import contract
 ├── command-engine/
 │   └── behavior-matrix.md
 └── decisions/            architecture decision records
+tools/
+└── h2-state-export/      standalone JDBC reference exporter
 ```
 
 Dependency direction is strictly one-way: `domain <- core <- command-engine <- commands <- app`.
@@ -89,6 +98,9 @@ The default prefix is `/`. Type a command as a normal text message:
 /dice 3
 /luck
 /24
+/admin me
+/admin list
+/pref list
 /help
 ```
 
@@ -102,13 +114,15 @@ section. See [config/application.example.toml](config/application.example.toml).
 ## CLI
 
 ```text
-lukosbot [--config PATH] [--log-filter FILTER] [run|check-config|migrate]
+lukosbot [--config PATH] [--log-filter FILTER] [run|check-config|migrate|import-state]
 ```
 
 - `run` — start the bot and connect enabled platforms. This is also the default when no subcommand
   is supplied, so `cargo run` and `lukosbot` start the bot directly.
 - `check-config` — load and validate configuration and print a redacted summary.
 - `migrate` — apply SQLite migrations and exit.
+- `import-state --input PATH [--apply] [--on-conflict fail|skip|replace]` — validate or import a JVM
+  `bot_state` JSONL export. It is a dry-run unless `--apply` is supplied.
 
 ## Development
 

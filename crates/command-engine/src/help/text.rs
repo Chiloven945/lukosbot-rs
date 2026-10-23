@@ -7,9 +7,21 @@ use crate::spec::{CommandDefinition, CommandNode, InputSpec, SyntaxLine, SyntaxP
 
 /// Renders the list of visible commands.
 pub fn render_list(registry: &CommandRegistry, prefix: &str) -> String {
+    render_list_where(registry, prefix, |_| true)
+}
+
+/// Renders the list of visible commands that pass an additional predicate.
+pub fn render_list_where(
+    registry: &CommandRegistry,
+    prefix: &str,
+    mut allowed: impl FnMut(&CommandDefinition) -> bool,
+) -> String {
     let mut output = String::from("可用命令：\n");
 
-    for command in registry.visible_commands() {
+    for command in registry
+        .visible_commands()
+        .filter(|command| allowed(command))
+    {
         let _ = write!(output, "{prefix}{}", command.name);
         if !command.aliases.is_empty() {
             let _ = write!(output, " ({})", command.aliases.join(", "));

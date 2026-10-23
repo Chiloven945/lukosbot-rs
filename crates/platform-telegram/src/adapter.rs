@@ -1,17 +1,20 @@
 //! Minimal teloxide-backed Telegram adapter.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use lukosbot_core::auth::{ChatAdminLookupError, ChatAdminResolver};
 use lukosbot_core::{InboundSender, PlatformAdapter, PlatformError};
 use lukosbot_domain::{
-    ChatAddress, OutboundMessage, OutboundPart, PlatformKind, PlatformMessageId, SentMessage,
+    ChatAddress, ChatKind, InboundMessage, OutboundMessage, OutboundPart, PlatformKind,
+    PlatformMessageId, SentMessage,
 };
 use reqwest012::Proxy;
 use teloxide::net::default_reqwest_settings;
 use teloxide::payloads::GetUpdatesSetters;
 use teloxide::prelude::Requester;
-use teloxide::types::ChatId;
+use teloxide::types::{ChatId, UserId};
 use teloxide::{ApiError, Bot, RequestError};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
@@ -49,6 +52,7 @@ pub struct TelegramAdapter {
     bot: Bot,
     client_timeout: Duration,
     proxy_configured: bool,
+    admin_cache: Arc<crate::admin::TelegramAdminCache>,
 }
 
 impl TelegramAdapter {
@@ -90,6 +94,7 @@ impl TelegramAdapter {
             bot: Bot::with_client(token.as_ref(), client),
             client_timeout,
             proxy_configured,
+            admin_cache: Arc::new(crate::admin::TelegramAdminCache::default()),
         })
     }
 }
@@ -215,6 +220,48 @@ impl PlatformAdapter for TelegramAdapter {
     async fn shutdown(&self) -> Result<(), PlatformError> {
         // The polling loop owns all resources; dropping `Bot` is sufficient.
         Ok(())
+    }
+}
+
+#[async_trait]
+impl ChatAdminResolver for TelegramAdapter {
+    fn supports(&self, platform: PlatformKind) -> bool {
+        platform == PLATFORM
+    }
+
+    async fn is_chat_admin(&self, message: &InboundMessage) -> Result<bool, ChatAdminLookupError> {
+        if !matches!(
+            message.address.kind,
+            ChatKind::Group | ChatKind::Supergroup | ChatKind::Channel
+        ) {
+            return Ok(false);
+        }
+
+        let chat_id = message
+            .address
+            .chat_id
+            .as_str()
+            .parse::<i64>()
+            .map_err(|error| ChatAdminLookupError::InvalidIdentity(format!("chat id: {error}")))?;
+        let user_id =
+            message.sender.id.as_str().parse::<u64>().map_err(|error| {
+                ChatAdminLookupError::InvalidIdentity(format!("user id: {error}"))
+            })?;
+
+        let key = crate::admin::AdminCacheKey::new(PLATFORM, chat_id, UserId(user_id));
+        if let Some(value) = self.admin_cache.get(&key).await {
+            return Ok(value);
+        }
+
+        let member = self
+            .bot
+            .get_chat_member(ChatId(chat_id), UserId(user_id))
+            .await
+            .map_err(|error| ChatAdminLookupError::Failed(Box::new(error)))?;
+
+        let value = crate::admin::is_admin_member(&member.kind);
+        self.admin_cache.put(key, value).await;
+        Ok(value)
     }
 }
 

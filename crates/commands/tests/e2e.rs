@@ -7,6 +7,7 @@ use tokio_util::sync::CancellationToken;
 use lukosbot_command_engine::CommandMessageHandler;
 use lukosbot_commands::basic::twenty_four::TwentyFourService;
 use lukosbot_commands::{BasicCommandsConfig, RuntimeInfo, build_registry};
+use lukosbot_core::policy::AllowAllPolicy;
 use lukosbot_core::testing::{MemoryStateStore, RecordingAdapter};
 use lukosbot_core::{AppRuntime, RuntimeSettings, StateStore};
 use lukosbot_domain::{
@@ -34,6 +35,7 @@ fn inbound(text: &str) -> InboundMessage {
         received_at: Utc::now(),
         parts: vec![InboundPart::Text(text.to_owned())],
         reply_to: None,
+        context: Default::default(),
     }
 }
 
@@ -81,7 +83,9 @@ async fn start_runtime(texts: &[&str], twenty_four_timeout: Option<Duration>) ->
         config.twenty_four = false;
     }
     let registry = build_registry(&config, runtime_info, handle).unwrap();
-    let handler = Arc::new(CommandMessageHandler::new("/", Arc::new(registry)).unwrap());
+    let handler = Arc::new(
+        CommandMessageHandler::new("/", Arc::new(registry), Arc::new(AllowAllPolicy)).unwrap(),
+    );
     let mut builder = AppRuntime::builder(
         settings(),
         handler,

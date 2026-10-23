@@ -17,6 +17,7 @@ mod platform;
 pub use address::{ChatAddress, InvalidPlatformId, PlatformChatId, PlatformUserId, Sender};
 pub use media::{MediaRef, MediaSource};
 pub use message::{
-    InboundMessage, InboundPart, OutboundMessage, OutboundPart, PlatformMessageId, SentMessage,
+    InboundMessage, InboundPart, MessageContext, OutboundMessage, OutboundPart, PlatformMessageId,
+    SentMessage,
 };
 pub use platform::{ChatKind, ParsePlatformKindError, PlatformKind};

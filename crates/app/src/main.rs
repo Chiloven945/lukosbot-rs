@@ -5,11 +5,11 @@ use std::process::ExitCode;
 use anyhow::Context;
 use clap::Parser;
 
-use lukosbot_app::cli::{Cli, Command};
+use lukosbot_app::cli::{Cli, Command, ConflictMode};
 use lukosbot_app::config::{self, CompiledPlatforms, ConfigSummary, LoadOptions};
 use lukosbot_app::{bootstrap, shutdown, telemetry};
 use lukosbot_core::StateStore;
-use lukosbot_infra::storage::SqliteStateStore;
+use lukosbot_infra::storage::{ImportOptions, SqliteStateStore, import_jsonl};
 
 fn main() -> ExitCode {
     run().unwrap_or_else(|error| {
@@ -49,6 +49,11 @@ fn run() -> anyhow::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Migrate => block_on(migrate(loaded))?,
+        Command::ImportState {
+            input,
+            apply,
+            on_conflict,
+        } => block_on(import_state(loaded, input, apply, on_conflict))?,
         Command::Run => block_on(run_bot(loaded))?,
     }
 }
@@ -61,6 +66,36 @@ async fn migrate(loaded: config::LoadedConfig) -> anyhow::Result<ExitCode> {
     store.close().await.context("closing the state store")?;
 
     tracing::info!("database migrations applied");
+    Ok(ExitCode::SUCCESS)
+}
+
+async fn import_state(
+    loaded: config::LoadedConfig,
+    input: std::path::PathBuf,
+    apply: bool,
+    on_conflict: ConflictMode,
+) -> anyhow::Result<ExitCode> {
+    let settings = bootstrap::storage_settings(&loaded.config);
+    let store = SqliteStateStore::connect(&settings)
+        .await
+        .context("opening the target SQLite state store")?;
+
+    let report = import_jsonl(
+        &store,
+        &input,
+        ImportOptions {
+            apply,
+            on_conflict: on_conflict.into(),
+        },
+    )
+    .await
+    .with_context(|| format!("importing state from `{}`", input.display()))?;
+
+    let mut stdout = std::io::stdout().lock();
+    writeln!(stdout, "{report}")?;
+    stdout.flush()?;
+
+    store.close().await.context("closing the state store")?;
     Ok(ExitCode::SUCCESS)
 }
 

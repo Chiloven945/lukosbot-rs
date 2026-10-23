@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use lukosbot_command_engine::{
     ArgType, ArgsSpec, CommandContext, CommandDefinition, CommandError, CommandExecutor,
     CommandInvocation, InputSpec, PositionalSpec, SyntaxLine, SyntaxPart, UsageMetadata,
-    help::{render_command, render_list},
+    help::{render_command, render_list_where},
+    policy_denied_message,
 };
 
 pub struct HelpCommand;
@@ -28,7 +29,11 @@ impl CommandExecutor for HelpCommand {
 
         let Some(command) = command.filter(|value| !value.trim().is_empty()) else {
             context
-                .reply_text(render_list(context.registry(), context.prefix()))
+                .reply_text(render_list_where(
+                    context.registry(),
+                    context.prefix(),
+                    |definition| context.is_command_allowed(&definition.name),
+                ))
                 .await?;
             return Ok(());
         };
@@ -44,6 +49,12 @@ impl CommandExecutor for HelpCommand {
                 context.prefix()
             )));
         };
+
+        if !context.is_command_allowed(&definition.name) {
+            return Err(CommandError::UserInput(policy_denied_message(
+                &definition.name,
+            )));
+        }
 
         let mode = mode.unwrap_or_default();
         let mode = mode.trim().to_ascii_lowercase();

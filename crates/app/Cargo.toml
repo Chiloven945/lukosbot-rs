@@ -31,6 +31,7 @@ dotenvy.workspace = true
 lukosbot-command-engine.workspace = true
 lukosbot-commands.workspace = true
 lukosbot-core.workspace = true
+lukosbot-domain.workspace = true
 lukosbot-infra.workspace = true
 lukosbot-platform-discord = { workspace = true, optional = true }
 lukosbot-platform-telegram = { workspace = true, optional = true }

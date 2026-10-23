@@ -5,8 +5,8 @@
 
 use lukosbot_core::PlatformError;
 use lukosbot_domain::{
-    ChatAddress, ChatKind, InboundMessage, InboundPart, MediaRef, MediaSource, PlatformChatId,
-    PlatformKind, PlatformMessageId, PlatformUserId, Sender,
+    ChatAddress, ChatKind, InboundMessage, InboundPart, MediaRef, MediaSource, MessageContext,
+    PlatformChatId, PlatformKind, PlatformMessageId, PlatformUserId, Sender,
 };
 use teloxide::types::{
     Chat, ChatKind as TelegramChatKind, Message, PublicChatKind, Update, UpdateKind,
@@ -91,6 +91,7 @@ fn map_message(message: &Message) -> Result<Option<InboundMessage>, PlatformErro
         received_at: message.date,
         parts,
         reply_to,
+        context: MessageContext::new(Some(false)),
     }))
 }
 
@@ -273,6 +274,7 @@ mod tests {
             Some("5")
         );
         assert_eq!(message.text_parts().collect::<Vec<_>>(), vec!["ping"]);
+        assert_eq!(message.context.nsfw, Some(false));
     }
 
     #[test]

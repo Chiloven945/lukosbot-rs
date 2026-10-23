@@ -4,7 +4,8 @@
 
 The codebase separates platform SDKs, infrastructure, command parsing, concrete commands, and
 process assembly so that each can be tested without the others. The current command engine covers
-text commands; permissions, media, and third-party integrations remain follow-up work.
+text commands, policy enforcement, persisted state, and core administration; media, service
+scheduling, and third-party integrations remain follow-up work.
 
 ## Crates and dependency direction
 
@@ -123,18 +124,54 @@ deadline.
 
 ## State storage
 
-`StateStore` stores opaque JSON values under a scoped, namespaced key. The SQLite implementation:
+`StateStore` stores JSON values under a scoped, namespaced key. The SQLite implementation:
 
 - uses `STRICT` tables and a composite primary key covering `scope_type`, `scope_platform`,
   `scope_id`, `namespace`, and `key`;
+- distinguishes the envelope `schema_version` from the record `revision` and preserves
+  `created_at` across updates;
 - stores timestamps as Unix milliseconds in UTC;
-- filters expired rows on read and removes them with `delete_expired`;
+- filters expired rows on read, removes them with `delete_expired`, and exposes exact-scope
+  namespace listing plus cross-scope namespace scanning;
 - embeds migrations at compile time (`sqlx::migrate!`), so startup and CI do not need a database
   URL;
 - keeps domain-specific state semantics out of the foundation.
 
 A chat's `ChatKind` is metadata and not part of the scope key, so reclassifying a chat does not
 orphan state.
+
+`core::state` layers typed definitions and scope resolution over the port:
+
+- `StateDefinition` is object-safe and uses JSON as its type-erasure boundary;
+  `TypedStateDefinition<T>` provides parse/validate/format for native types without `Any`.
+- `StateRegistry` rejects duplicate or malformed definitions at startup.
+- `StateService` resolves `CHAT -> USER -> GLOBAL -> default` (or a definition-specific order),
+  skips disallowed/missing scopes, and falls back with a warning when a stored value is corrupt.
+- `StateMaintenanceWorker` is supervised by the runtime and periodically deletes expired rows.
+
+## Authorization
+
+`core::auth` separates bot-wide administrators from chat administrators:
+
+- bootstrap administrators come from configuration and cannot be removed by commands;
+- dynamic administrators live at `GLOBAL / auth / bot_admins`, with compatibility reads for the
+  legacy uppercase-platform/numeric-ID JSON and canonical lowercase/string writes;
+- `BotAdminService` serialises dynamic read-modify-write operations;
+- `AuthorizationService` resolves chat administrators through `ChatAdminResolver` implementations;
+- resolver failures, timeouts, and corrupt storage fail closed rather than granting access.
+
+Telegram queries `get_chat_member` with a 60-second cache. Discord records the permission snapshot
+from the gateway message event in a bounded cache; a cache miss is treated as unverifiable, not as
+permission.
+
+## Policy
+
+`core::policy` is an immutable, pre-validated engine independent of TOML and platform SDKs.
+`PolicyContext` is derived from trusted `InboundMessage` fields, including `MessageContext.nsfw`.
+All configured `when` conditions are ANDed; disabled command names from all matching rules are
+unioned, and allowed-value sets are intersected. `CommandMessageHandler` applies the canonical
+command policy before argument parsing, and `/help` filters both its list and detail view through
+the same policy query.
 
 ## Configuration and secrets
 
@@ -163,6 +200,9 @@ protections in its own design.
 - `PlatformAdapter` is the boundary for richer platform behaviour (media upload, interactions, slash
   commands).
 - `StateStore` is the boundary for preferences, admin state, and service state.
+- `StateDefinition` / `StateRegistry` / `StateService` are the boundary for typed scoped state.
+- `ChatAdminResolver` is the platform boundary for chat-administrator checks.
+- `CommandPolicy` is the command-engine boundary for immutable policy evaluation.
 - `HttpClient` is the shared client for future third-party API commands.
 - `RuntimeWorker` is the boundary for supervised long-lived components.
 

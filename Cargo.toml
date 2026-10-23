@@ -63,6 +63,7 @@ serenity = { version = "0.12", default-features = false, features = [
     "model",
     "http",
     "builder",
+    "cache",
     "native_tls_backend",
 ] }
 sqlx = { version = "0.9", default-features = false, features = [

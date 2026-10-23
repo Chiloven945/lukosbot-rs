@@ -9,8 +9,9 @@ use tokio_util::sync::CancellationToken;
 use lukosbot_command_engine::{
     ArgType, ArgsSpec, CommandContext, CommandDefinition, CommandError, CommandExecutor,
     CommandInvocation, CommandMessageHandler, CommandRegistry, CommandRegistryBuilder, InputSpec,
-    PositionalSpec, lexer, parse_args, parser,
+    PositionalSpec, lexer, parse_args,
 };
+use lukosbot_core::policy::AllowAllPolicy;
 use lukosbot_core::testing::{MemoryStateStore, RecordingAdapter};
 use lukosbot_core::{AppRuntime, RuntimeSettings, StateStore};
 use lukosbot_domain::{
@@ -83,6 +84,7 @@ fn inbound(text: &str) -> InboundMessage {
         received_at: Utc::now(),
         parts: vec![InboundPart::Text(text.to_owned())],
         reply_to: None,
+        context: Default::default(),
     }
 }
 
@@ -229,7 +231,10 @@ async fn run_messages(
         adapter.push_inbound(inbound(text));
     }
 
-    let handler = Arc::new(CommandMessageHandler::new("/", Arc::new(test_registry())).unwrap());
+    let handler = Arc::new(
+        CommandMessageHandler::new("/", Arc::new(test_registry()), Arc::new(AllowAllPolicy))
+            .unwrap(),
+    );
     let runtime = AppRuntime::builder(
         settings(),
         handler,
@@ -310,7 +315,7 @@ async fn handler_replies_to_blank_raw_command() {
 #[test]
 fn parser_module_alias_is_public() {
     // Keep the public parser entry point covered by a compile-time use.
-    let _ = parser::parse_args;
+    let _ = parse_args;
 }
 
 fn args_spec() -> ArgsSpec {
@@ -335,7 +340,7 @@ fn args_spec() -> ArgsSpec {
 fn parse(
     text: &str,
 ) -> Result<lukosbot_command_engine::ParsedArgs, lukosbot_command_engine::CommandParseError> {
-    let tokens = lexer::split(text).unwrap();
+    let tokens = lexer::split(text)?;
     parse_args(&tokens, &args_spec())
 }
 

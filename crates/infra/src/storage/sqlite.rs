@@ -5,6 +5,7 @@
 //! is rejected by SQLite rather than silently coerced.
 
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -15,7 +16,10 @@ use sqlx::{Row, SqlitePool};
 use tracing::{debug, info};
 
 use lukosbot_core::StateStoreError;
-use lukosbot_core::ports::{StateKey, StateStore, VALUE_VERSION, VersionedValue};
+use lukosbot_core::ports::{
+    SCHEMA_VERSION, StateEntry, StateKey, StateScope, StateScopeKind, StateStore, VersionedValue,
+};
+use lukosbot_domain::{PlatformChatId, PlatformKind, PlatformUserId};
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
@@ -101,6 +105,12 @@ impl SqliteStateStore {
             Ok(())
         }
     }
+
+    /// The importer is an infrastructure-only migration tool and needs a transaction on the same
+    /// pool as the store. It is deliberately not exposed through the generic `StateStore` port.
+    pub(crate) fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
 }
 
 fn create_parent_directory(path: &std::path::Path) -> Result<(), StateStoreError> {
@@ -126,7 +136,7 @@ impl StateStore for SqliteStateStore {
 
         let row = sqlx::query(
             r#"
-            SELECT value_json, version, updated_at, expires_at
+            SELECT value_json, schema_version, revision, created_at, updated_at, expires_at
             FROM state
             WHERE scope_type = ?1
               AND scope_platform = ?2
@@ -137,11 +147,7 @@ impl StateStore for SqliteStateStore {
             "#,
         )
         .bind(key.scope.scope_type())
-        .bind(
-            key.scope
-                .platform()
-                .map_or("", |platform| platform.as_str()),
-        )
+        .bind(key.scope.platform().map_or("", PlatformKind::as_str))
         .bind(key.scope.scope_id().unwrap_or(""))
         .bind(&key.namespace)
         .bind(&key.key)
@@ -150,34 +156,7 @@ impl StateStore for SqliteStateStore {
         .await
         .map_err(|error| StateStoreError::backend("read state entry", error))?;
 
-        let Some(row) = row else {
-            return Ok(None);
-        };
-
-        let value_json: String = row
-            .try_get("value_json")
-            .map_err(|error| StateStoreError::backend("decode state value", error))?;
-        let value = serde_json::from_str(&value_json)?;
-
-        let version: i64 = row
-            .try_get("version")
-            .map_err(|error| StateStoreError::backend("decode state version", error))?;
-        let version = u32::try_from(version)
-            .map_err(|error| StateStoreError::backend("decode state version", error))?;
-
-        let updated_at_ms: i64 = row
-            .try_get("updated_at")
-            .map_err(|error| StateStoreError::backend("decode state timestamp", error))?;
-        let expires_at_ms: Option<i64> = row
-            .try_get("expires_at")
-            .map_err(|error| StateStoreError::backend("decode state expiry", error))?;
-
-        Ok(Some(VersionedValue {
-            value,
-            version,
-            updated_at: timestamp_from_millis(updated_at_ms)?,
-            expires_at: expires_at_ms.map(timestamp_from_millis).transpose()?,
-        }))
+        row.as_ref().map(decode_value).transpose()
     }
 
     async fn put(
@@ -196,28 +175,25 @@ impl StateStore for SqliteStateStore {
             r#"
             INSERT INTO state (
                 scope_type, scope_platform, scope_id, namespace, "key",
-                value_json, version, created_at, updated_at, expires_at
+                value_json, schema_version, revision, created_at, updated_at, expires_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?8, ?9)
             ON CONFLICT (scope_type, scope_platform, scope_id, namespace, "key")
             DO UPDATE SET
                 value_json = excluded.value_json,
-                version = excluded.version,
+                schema_version = excluded.schema_version,
+                revision = revision + 1,
                 updated_at = excluded.updated_at,
                 expires_at = excluded.expires_at
             "#,
         )
         .bind(key.scope.scope_type())
-        .bind(
-            key.scope
-                .platform()
-                .map_or("", |platform| platform.as_str()),
-        )
+        .bind(key.scope.platform().map_or("", PlatformKind::as_str))
         .bind(key.scope.scope_id().unwrap_or(""))
         .bind(&key.namespace)
         .bind(&key.key)
         .bind(value_json)
-        .bind(i64::from(VALUE_VERSION))
+        .bind(i64::from(SCHEMA_VERSION))
         .bind(now)
         .bind(expires_at)
         .execute(&self.pool)
@@ -241,11 +217,7 @@ impl StateStore for SqliteStateStore {
             "#,
         )
         .bind(key.scope.scope_type())
-        .bind(
-            key.scope
-                .platform()
-                .map_or("", |platform| platform.as_str()),
-        )
+        .bind(key.scope.platform().map_or("", PlatformKind::as_str))
         .bind(key.scope.scope_id().unwrap_or(""))
         .bind(&key.namespace)
         .bind(&key.key)
@@ -254,6 +226,68 @@ impl StateStore for SqliteStateStore {
         .map_err(|error| StateStoreError::backend("delete state entry", error))?;
 
         Ok(())
+    }
+
+    async fn list_namespace(
+        &self,
+        scope: &StateScope,
+        namespace: &str,
+    ) -> Result<Vec<StateEntry>, StateStoreError> {
+        self.ensure_open()?;
+        StateKey::validate_namespace(namespace)?;
+
+        let rows = sqlx::query(
+            r#"
+            SELECT scope_type, scope_platform, scope_id, namespace, "key",
+                   value_json, schema_version, revision, created_at, updated_at, expires_at
+            FROM state
+            WHERE scope_type = ?1
+              AND scope_platform = ?2
+              AND scope_id = ?3
+              AND namespace = ?4
+              AND (expires_at IS NULL OR expires_at > ?5)
+            ORDER BY "key"
+            "#,
+        )
+        .bind(scope.scope_type())
+        .bind(scope.platform().map_or("", PlatformKind::as_str))
+        .bind(scope.scope_id().unwrap_or(""))
+        .bind(namespace)
+        .bind(Utc::now().timestamp_millis())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| StateStoreError::backend("list state namespace", error))?;
+
+        rows.iter().map(decode_entry).collect()
+    }
+
+    async fn scan_namespace(
+        &self,
+        scope_kind: StateScopeKind,
+        namespace: &str,
+    ) -> Result<Vec<StateEntry>, StateStoreError> {
+        self.ensure_open()?;
+        StateKey::validate_namespace(namespace)?;
+
+        let rows = sqlx::query(
+            r#"
+            SELECT scope_type, scope_platform, scope_id, namespace, "key",
+                   value_json, schema_version, revision, created_at, updated_at, expires_at
+            FROM state
+            WHERE scope_type = ?1
+              AND namespace = ?2
+              AND (expires_at IS NULL OR expires_at > ?3)
+            ORDER BY scope_platform, scope_id, "key"
+            "#,
+        )
+        .bind(scope_kind.as_str())
+        .bind(namespace)
+        .bind(Utc::now().timestamp_millis())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| StateStoreError::backend("scan state namespace", error))?;
+
+        rows.iter().map(decode_entry).collect()
     }
 
     async fn delete_expired(&self, now: DateTime<Utc>) -> Result<u64, StateStoreError> {
@@ -273,6 +307,93 @@ impl StateStore for SqliteStateStore {
         self.pool.close().await;
         Ok(())
     }
+}
+
+fn decode_entry(row: &sqlx::sqlite::SqliteRow) -> Result<StateEntry, StateStoreError> {
+    Ok(StateEntry {
+        key: decode_key(row)?,
+        value: decode_value(row)?,
+    })
+}
+
+fn decode_key(row: &sqlx::sqlite::SqliteRow) -> Result<StateKey, StateStoreError> {
+    let scope_type: String = row
+        .try_get("scope_type")
+        .map_err(|error| StateStoreError::backend("decode state scope type", error))?;
+    let scope_platform: String = row
+        .try_get("scope_platform")
+        .map_err(|error| StateStoreError::backend("decode state platform", error))?;
+    let scope_id: String = row
+        .try_get("scope_id")
+        .map_err(|error| StateStoreError::backend("decode state scope id", error))?;
+    let namespace: String = row
+        .try_get("namespace")
+        .map_err(|error| StateStoreError::backend("decode state namespace", error))?;
+    let key: String = row
+        .try_get("key")
+        .map_err(|error| StateStoreError::backend("decode state key", error))?;
+
+    let scope_kind = StateScopeKind::from_str(&scope_type)
+        .map_err(|error| StateStoreError::backend("decode state scope", error))?;
+
+    let scope = match scope_kind {
+        StateScopeKind::Global => StateScope::Global,
+        StateScopeKind::Chat => StateScope::Chat {
+            platform: decode_platform(&scope_platform)?,
+            chat_id: PlatformChatId::new(scope_id)
+                .map_err(|error| StateStoreError::backend("decode chat id", error))?,
+        },
+        StateScopeKind::User => StateScope::User {
+            platform: decode_platform(&scope_platform)?,
+            user_id: PlatformUserId::new(scope_id)
+                .map_err(|error| StateStoreError::backend("decode user id", error))?,
+        },
+    };
+
+    StateKey::new(scope, namespace, key)
+}
+
+fn decode_platform(value: &str) -> Result<PlatformKind, StateStoreError> {
+    PlatformKind::from_str(value)
+        .map_err(|error| StateStoreError::backend("decode state platform", error))
+}
+
+fn decode_value(row: &sqlx::sqlite::SqliteRow) -> Result<VersionedValue, StateStoreError> {
+    let value_json: String = row
+        .try_get("value_json")
+        .map_err(|error| StateStoreError::backend("decode state value", error))?;
+    let value = serde_json::from_str(&value_json)?;
+
+    let schema_version: i64 = row
+        .try_get("schema_version")
+        .map_err(|error| StateStoreError::backend("decode schema version", error))?;
+    let schema_version = u32::try_from(schema_version)
+        .map_err(|error| StateStoreError::backend("decode schema version", error))?;
+
+    let revision: i64 = row
+        .try_get("revision")
+        .map_err(|error| StateStoreError::backend("decode state revision", error))?;
+    let revision = u64::try_from(revision)
+        .map_err(|error| StateStoreError::backend("decode state revision", error))?;
+
+    let created_at_ms: i64 = row
+        .try_get("created_at")
+        .map_err(|error| StateStoreError::backend("decode created_at", error))?;
+    let updated_at_ms: i64 = row
+        .try_get("updated_at")
+        .map_err(|error| StateStoreError::backend("decode state timestamp", error))?;
+    let expires_at_ms: Option<i64> = row
+        .try_get("expires_at")
+        .map_err(|error| StateStoreError::backend("decode state expiry", error))?;
+
+    Ok(VersionedValue {
+        value,
+        schema_version,
+        revision,
+        created_at: timestamp_from_millis(created_at_ms)?,
+        updated_at: timestamp_from_millis(updated_at_ms)?,
+        expires_at: expires_at_ms.map(timestamp_from_millis).transpose()?,
+    })
 }
 
 fn timestamp_from_millis(millis: i64) -> Result<DateTime<Utc>, StateStoreError> {

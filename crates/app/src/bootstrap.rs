@@ -6,8 +6,14 @@ use std::time::Duration;
 use anyhow::Context;
 
 use lukosbot_command_engine::CommandMessageHandler;
-use lukosbot_commands::{BasicCommandsConfig, RuntimeInfo, TwentyFourService, build_registry};
-use lukosbot_core::{AppRuntime, RuntimeSettings, StateStore};
+use lukosbot_commands::{
+    BasicCommandsConfig, ControlCommands, RuntimeInfo, TwentyFourService,
+    build_registry_with_controls,
+};
+use lukosbot_core::auth::{AuthorizationService, BotAdminService, ChatAdminResolver};
+use lukosbot_core::policy::{CommandPolicy, PolicyEngine};
+use lukosbot_core::state::{StateMaintenanceWorker, StateRegistry, StateService};
+use lukosbot_core::{AppRuntime, PlatformAdapter, RuntimeSettings, StateStore};
 use lukosbot_infra::http::{HttpClient, HttpSettings};
 use lukosbot_infra::storage::{SqliteSettings, SqliteStateStore};
 
@@ -16,7 +22,7 @@ use crate::config::{AppConfig, LoadedConfig};
 /// A fully assembled application that is ready to run.
 ///
 /// The shared HTTP client is validated at startup (including proxy configuration) and kept alive
-/// for future command services. The base runtime does not consume it yet.
+/// for future command services.
 pub struct Bootstrapped {
     pub runtime: AppRuntime,
     pub http: Arc<HttpClient>,
@@ -34,11 +40,77 @@ pub async fn bootstrap(loaded: LoadedConfig) -> anyhow::Result<Bootstrapped> {
     let http = Arc::new(
         HttpClient::new(http_settings(&config)).context("building the shared HTTP client")?,
     );
-
     tracing::debug!(
         proxy = config.http.proxy_url().is_some(),
         "shared HTTP client ready"
     );
+
+    let bootstrap_admins = config.security.compile().map_err(config_issues)?;
+    let policy_rules = config.policy.compile().map_err(config_issues)?;
+    let policy_engine = PolicyEngine::new(policy_rules).context("validating policy rules")?;
+    let policy: Arc<dyn CommandPolicy> = Arc::new(policy_engine);
+
+    let admins = Arc::new(BotAdminService::new(Arc::clone(&store), bootstrap_admins));
+
+    match admins.list_effective_admins().await {
+        Ok(effective) if effective.values().all(|ids| ids.is_empty()) => {
+            tracing::warn!(
+                "no effective bot administrators are configured; /admin will be unavailable to users"
+            );
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::warn!(%error, "failed to inspect bot administrators at startup");
+        }
+    }
+
+    // The vectors stay mutable when a platform feature is compiled in. With no platform features
+    // they are intentionally empty, so suppress the otherwise harmless `unused_mut` warning.
+    #[allow(unused_mut)]
+    let mut adapters: Vec<Arc<dyn PlatformAdapter>> = Vec::new();
+    #[allow(unused_mut)]
+    let mut resolvers: Vec<Arc<dyn ChatAdminResolver>> = Vec::new();
+
+    #[cfg(feature = "telegram")]
+    if config.platforms.telegram.enabled {
+        let token = config
+            .platforms
+            .telegram
+            .token()
+            .expect("configuration validation requires a Telegram token");
+        let adapter = Arc::new(
+            lukosbot_platform_telegram::TelegramAdapter::with_http(
+                token,
+                lukosbot_platform_telegram::TelegramHttpSettings {
+                    connect_timeout: Duration::from_secs(config.http.connect_timeout_secs),
+                    request_timeout: Duration::from_secs(config.http.request_timeout_secs),
+                    proxy: config.http.proxy_url().map(str::to_owned),
+                },
+            )
+            .context("building the Telegram HTTP client")?,
+        );
+        adapters.push(adapter.clone());
+        resolvers.push(adapter);
+    }
+
+    #[cfg(feature = "discord")]
+    if config.platforms.discord.enabled {
+        let token = config
+            .platforms
+            .discord
+            .token()
+            .expect("configuration validation requires a Discord token");
+        let adapter = Arc::new(lukosbot_platform_discord::DiscordAdapter::new(token));
+        adapters.push(adapter.clone());
+        resolvers.push(adapter);
+    }
+
+    let authorization = Arc::new(AuthorizationService::new(admins.clone(), resolvers));
+    let state_registry = Arc::new(StateRegistry::default());
+    let state_service = Arc::new(StateService::new(
+        Arc::clone(&store),
+        Arc::clone(&state_registry),
+    ));
 
     let runtime_info = Arc::new(RuntimeInfo::new(env!("CARGO_PKG_VERSION")));
     let (twenty_four_handle, twenty_four_worker) = if config.commands.basic.twenty_four {
@@ -61,65 +133,53 @@ pub async fn bootstrap(loaded: LoadedConfig) -> anyhow::Result<Bootstrapped> {
         twenty_four: config.commands.basic.twenty_four,
         weather: config.commands.basic.weather,
     };
-    let registry = build_registry(&command_config, runtime_info, twenty_four_handle)
-        .context("building the command registry")?;
+    let controls = ControlCommands {
+        admin: config.commands.control.admin,
+        pref: config.commands.control.pref,
+        bot_admins: Some(admins),
+        authorization: Some(authorization),
+        state_service: Some(state_service),
+    };
+    let registry =
+        build_registry_with_controls(&command_config, runtime_info, twenty_four_handle, controls)
+            .context("building the command registry")?;
+
     let handler = Arc::new(
-        CommandMessageHandler::new(&config.commands.prefix, Arc::new(registry))
+        CommandMessageHandler::new(&config.commands.prefix, Arc::new(registry), policy)
             .context("building the command handler")?,
     );
 
-    let builder = AppRuntime::builder(runtime_settings(&config), handler, store);
+    let mut builder = AppRuntime::builder(runtime_settings(&config), handler, Arc::clone(&store));
 
-    let builder = if let Some(worker) = twenty_four_worker {
-        builder
+    if let Some(worker) = twenty_four_worker {
+        builder = builder
             .add_worker(Arc::new(worker))
-            .context("registering the 24-point worker")?
-    } else {
-        builder
-    };
+            .context("registering the 24-point worker")?;
+    }
 
-    #[cfg(feature = "telegram")]
-    let builder = if config.platforms.telegram.enabled {
-        let token = config
-            .platforms
-            .telegram
-            .token()
-            .expect("configuration validation requires a Telegram token");
-        let adapter = lukosbot_platform_telegram::TelegramAdapter::with_http(
-            token,
-            lukosbot_platform_telegram::TelegramHttpSettings {
-                connect_timeout: Duration::from_secs(config.http.connect_timeout_secs),
-                request_timeout: Duration::from_secs(config.http.request_timeout_secs),
-                proxy: config.http.proxy_url().map(str::to_owned),
-            },
+    if config.storage.expiry_cleanup_interval_secs > 0 {
+        let worker = StateMaintenanceWorker::new(
+            Arc::clone(&store),
+            Duration::from_secs(config.storage.expiry_cleanup_interval_secs),
         )
-        .context("building the Telegram HTTP client")?;
+        .context("building the state maintenance worker")?;
+        builder = builder
+            .add_worker(Arc::new(worker))
+            .context("registering the state maintenance worker")?;
+    }
 
-        builder
-            .add_platform(Arc::new(adapter))
-            .context("registering the Telegram adapter")?
-    } else {
-        builder
-    };
+    for adapter in adapters {
+        builder = builder
+            .add_platform(adapter)
+            .context("registering a platform adapter")?;
+    }
 
-    #[cfg(feature = "discord")]
-    let builder = if config.platforms.discord.enabled {
-        let token = config
-            .platforms
-            .discord
-            .token()
-            .expect("configuration validation requires a Discord token");
-        builder
-            .add_platform(Arc::new(lukosbot_platform_discord::DiscordAdapter::new(
-                token,
-            )))
-            .context("registering the Discord adapter")?
-    } else {
-        builder
-    };
+    if config.commands.control.service {
+        tracing::debug!(
+            "service control is configured but the service subsystem is not implemented yet"
+        );
+    }
 
-    // Keep the configuration values used for construction observable in debug logs without
-    // logging secrets.
     tracing::debug!(
         inbound_capacity = config.runtime.inbound_queue_capacity,
         outbound_capacity = config.runtime.outbound_queue_capacity,
@@ -130,6 +190,10 @@ pub async fn bootstrap(loaded: LoadedConfig) -> anyhow::Result<Bootstrapped> {
         runtime: builder.build(),
         http,
     })
+}
+
+fn config_issues(issues: Vec<String>) -> anyhow::Error {
+    anyhow::anyhow!("invalid configuration:\n{}", issues.join("\n"))
 }
 
 fn runtime_settings(config: &AppConfig) -> RuntimeSettings {

@@ -34,6 +34,21 @@ impl fmt::Display for PlatformMessageId {
     }
 }
 
+/// Trusted platform context attached to an inbound message.
+///
+/// `nsfw` is `None` when the adapter could not determine the channel state. Policy resolution
+/// treats an unknown state as non-NSFW for compatibility with the legacy bot.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MessageContext {
+    pub nsfw: Option<bool>,
+}
+
+impl MessageContext {
+    pub const fn new(nsfw: Option<bool>) -> Self {
+        Self { nsfw }
+    }
+}
+
 /// A message received from a platform, normalised into platform-independent parts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InboundMessage {
@@ -43,6 +58,7 @@ pub struct InboundMessage {
     pub received_at: DateTime<Utc>,
     pub parts: Vec<InboundPart>,
     pub reply_to: Option<PlatformMessageId>,
+    pub context: MessageContext,
 }
 
 impl InboundMessage {
@@ -142,6 +158,7 @@ mod tests {
             received_at: Utc::now(),
             parts,
             reply_to: None,
+            context: MessageContext::default(),
         }
     }
 
