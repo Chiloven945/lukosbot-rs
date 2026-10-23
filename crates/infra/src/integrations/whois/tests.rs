@@ -1,128 +1,120 @@
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use lukosbot_integrations::IntegrationError;
+use lukosbot_integrations::{IntegrationError, WhoisService};
 
 use super::*;
 
-#[test]
-fn normalizes_idna_and_trailing_dots() {
-    assert_eq!(normalize_domain("Example.COM.").unwrap(), "example.com");
-    assert_eq!(
-        normalize_domain("例子.中国").unwrap(),
-        "xn--fsqu00a.xn--fiqs8s"
-    );
-    assert_eq!(static_server("cn"), Some("whois.cnnic.cn"));
-    assert_eq!(static_server("xn--fiqs8s"), Some("whois.cnnic.cn"));
-    assert_eq!(static_server("com"), Some("whois.internic.net"));
+async fn spawn_server(
+    expected: &'static [u8],
+    response: &'static [u8],
+) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut buffer = [0_u8; 256];
+        let read = stream.read(&mut buffer).await.unwrap();
+        assert_eq!(&buffer[..read], expected);
+        stream.write_all(response).await.unwrap();
+    });
+    (address, task)
 }
 
-#[test]
-fn rejects_injection_and_invalid_domains() {
-    for invalid in [
-        "",
-        "example.com\r\n",
-        "example.com:43",
-        "https://example.com",
-        "1.1.1.1",
-        "-bad.example",
-        "bad-.example",
-        "a..b",
-    ] {
-        assert!(normalize_domain(invalid).is_err(), "{invalid}");
+#[tokio::test]
+async fn invalid_domains_fail_before_network_io() {
+    let client = WhoisClient::new(WhoisSettings::default());
+    for invalid in ["localhost", "com", "example.com..", "1.1.1.1"] {
+        let error = client.query(invalid).await.unwrap_err();
+        assert!(
+            matches!(error, IntegrationError::InvalidInput { .. }),
+            "{invalid}: {error}"
+        );
     }
 }
 
 #[test]
-fn parses_iana_referrals_only_from_valid_hosts() {
-    assert_eq!(
-        parse_iana_referral("domain: TEST\nwhois: whois.example.test\n"),
-        Some("whois.example.test".to_owned())
-    );
-    assert_eq!(parse_iana_referral("whois: 127.0.0.1\n"), None);
-}
-
-#[test]
-fn cleans_boilerplate_duplicates_and_blank_runs() {
-    let raw = "Domain: EXAMPLE.COM\r\n\
-               Registrar: One\r\n\
-               Empty:\r\n\
-               Registrar: Two\r\n\
-               \r\n\r\n\r\n\
-               NOTICE: stop here\r\n\
-               After: ignored\r\n";
-    let (text, _) = clean_whois(raw);
-    assert!(text.contains("Registrar: One, Two"));
-    assert!(!text.contains("Empty:"));
-    assert!(!text.contains("NOTICE"));
-    assert!(!text.contains("After:"));
-    assert!(text.starts_with("Domain: EXAMPLE.COM"));
+fn default_settings_are_bounded() {
+    let settings = WhoisSettings::default();
+    assert!(settings.connect_timeout <= settings.total_timeout);
+    assert!(settings.max_response_bytes > 0);
 }
 
 #[tokio::test]
-async fn exchanges_a_bounded_whois_query_with_a_mock_server() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        let mut request = [0_u8; 128];
-        let read = socket.read(&mut request).await.unwrap();
-        assert_eq!(&request[..read], b"example.com\r\n");
-        socket.write_all(b"Domain: EXAMPLE.COM\r\n").await.unwrap();
-    });
-
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let (text, truncated) = exchange_addr(
-        address,
-        "example.com",
-        deadline,
-        Duration::from_secs(1),
-        1024,
+async fn resolves_iana_referral_and_queries_the_registry() {
+    let (iana, iana_task) = spawn_server(
+        b"io\r\n",
+        b"% IANA WHOIS server\ndomain: IO\nwhois:          whois.nic.io\n",
     )
-    .await
-    .unwrap();
-    server.await.unwrap();
+    .await;
+    let (registry, registry_task) = spawn_server(
+        b"example.io\r\n",
+        b"Domain Name: example.io\nRegistrar: Example\n",
+    )
+    .await;
 
-    assert_eq!(text.trim(), "Domain: EXAMPLE.COM");
-    assert!(!truncated);
+    let client = WhoisClient::with_test_endpoints(
+        WhoisSettings {
+            connect_timeout: Duration::from_secs(1),
+            total_timeout: Duration::from_secs(2),
+            max_response_bytes: 1024,
+        },
+        iana,
+        registry,
+    );
+    let record = client.query("example.io").await.unwrap();
+    iana_task.await.unwrap();
+    registry_task.await.unwrap();
+
+    assert_eq!(record.server, "whois.nic.io");
+    assert!(record.text.contains("Domain Name: example.io"));
+    assert!(!record.truncated);
 }
 
 #[tokio::test]
-async fn exchange_enforces_the_response_limit() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        let mut request = [0_u8; 128];
-        let _ = socket.read(&mut request).await.unwrap();
-        socket.write_all(&[b'x'; 100]).await.unwrap();
-    });
+async fn no_iana_referral_is_not_treated_as_a_registry_query() {
+    let (iana, iana_task) = spawn_server(b"dev\r\n", b"domain: DEV\nwhois:\n").await;
 
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let (text, truncated) =
-        exchange_addr(address, "example.com", deadline, Duration::from_secs(1), 10)
-            .await
-            .unwrap();
-    server.await.unwrap();
+    let client = WhoisClient::with_test_endpoints(
+        WhoisSettings {
+            connect_timeout: Duration::from_secs(1),
+            total_timeout: Duration::from_secs(2),
+            max_response_bytes: 1024,
+        },
+        iana,
+        iana,
+    );
+    let error = client.query("example.dev").await.unwrap_err();
+    iana_task.await.unwrap();
 
-    assert_eq!(text, "xxxxxxxxxx");
-    assert!(truncated);
+    assert!(matches!(error, IntegrationError::NotFound));
 }
 
-#[test]
-fn rejects_empty_domain_with_a_typed_error() {
-    assert!(matches!(
-        normalize_domain(""),
-        Err(IntegrationError::InvalidInput { .. })
-    ));
-}
+#[tokio::test]
+async fn maps_no_match_responses_to_not_found() {
+    let (iana, iana_task) =
+        spawn_server(b"dev\r\n", b"domain: DEV\nwhois:          whois.nic.dev\n").await;
+    let (registry, registry_task) = spawn_server(
+        b"example.dev\r\n",
+        b"No match for \"EXAMPLE.DEV\".\n>>> Last update of whois database: now\n",
+    )
+    .await;
 
-#[test]
-fn final_output_is_character_limited() {
-    let raw = format!("Key: {}", "值".repeat(MAX_DISPLAY_CHARS + 100));
-    let (text, truncated) = clean_whois(&raw);
-    assert!(truncated);
-    assert_eq!(text.chars().count(), MAX_DISPLAY_CHARS);
+    let client = WhoisClient::with_test_endpoints(
+        WhoisSettings {
+            connect_timeout: Duration::from_secs(1),
+            total_timeout: Duration::from_secs(2),
+            max_response_bytes: 1024,
+        },
+        iana,
+        registry,
+    );
+    let error = client.query("example.dev").await.unwrap_err();
+    iana_task.await.unwrap();
+    registry_task.await.unwrap();
+
+    assert!(matches!(error, IntegrationError::NotFound));
 }

@@ -99,17 +99,25 @@ hosts.
 
 ## WHOIS
 
-- Domain normalization strips surrounding whitespace and trailing dots, rejects any control
-  character (including CR/LF), ports, paths, IP literals, and invalid labels, then applies IDNA.
+- Domain normalization strips surrounding whitespace and at most one trailing dot, rejects any
+  control character (including CR/LF), IP literals, ports, paths, and single-label names, then
+  applies IDNA. At least two labels are required.
 - `com`, `net`, and `edu` use `whois.internic.net` (the confirmed Commons Net 3.13.0
   `WhoisClient.DEFAULT_HOST`).
 - `cn` and IDNA `xn--fiqs8s` (`中国`) use `whois.cnnic.cn`.
-- Other TLDs query `whois.iana.org` for a `whois:` referral, validate the referral hostname, and
-  fall back to `whois.internic.net` when it is missing or unusable.
+- Other TLDs query `whois.iana.org` for a `whois:` referral. A successful IANA response without a
+  valid referral returns not-found for that TLD; an IANA transport failure falls back to
+  `whois.internic.net`.
 - TCP port 43 is accessed with Tokio. DNS results must contain a public address; loopback, private,
-  link-local, unspecified, multicast, documentation, and broadcast addresses are rejected.
+  link-local, unspecified, multicast, documentation, broadcast, and IPv4-mapped private/loopback
+  addresses are rejected. All public addresses are tried, IPv4 first, so a broken IPv6 route does
+  not hide a working IPv4 registry server.
 - Connection timeout, total deadline, and raw response size are configurable. The default raw limit
   is 64 KiB.
+- Registry responses starting with `No match`, `Not found`, `Domain not found`, or
+  `No entries found` are mapped to a not-found result instead of being displayed as a record.
+- TLDs that publish no WHOIS referral (for example some modern Google TLDs) return not-found; RDAP
+  fallback is outside the current `/whois` scope.
 - Cleanup truncates at known boilerplate markers, normalizes line endings, removes empty key lines,
   merges duplicate keys in first-seen order, compresses blank runs, strips control characters, and
   limits the final text to 1,800 Unicode scalar values.

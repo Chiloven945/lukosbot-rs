@@ -174,8 +174,10 @@ max_response_bytes = 65536
 - Bilibili short links use a no-redirect HTTP client and an exact host allowlist. Do not weaken this
   to a substring check or automatic redirects.
 - WHOIS uses DNS address validation, port 43 TCP, a connect timeout, a total deadline, and a raw
-  response limit. The default registry is `whois.internic.net`; `.cn`/`中国` use
-  `whois.cnnic.cn`, and other TLDs use an IANA referral with fallback.
+  response limit. It tries all public addresses (IPv4 first) so a broken IPv6 route does not lose a
+  working query. The default registry is `whois.internic.net`; `.cn`/`中国` use
+  `whois.cnnic.cn`, and other TLDs use an IANA referral. If IANA answers without a WHOIS referral,
+  the TLD is reported as having no WHOIS service rather than querying a wrong fallback registry.
 - All integration replies are capped at 1,800 Unicode scalar values to fit both Telegram and
   Discord. Bilibili descriptions have an additional 160-character limit.
 
