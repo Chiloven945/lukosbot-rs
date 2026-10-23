@@ -14,9 +14,10 @@ are the usual sources of memory growth and hangs during shutdown.
 ### Supervision
 
 `AppRuntime` owns a `JoinSet` containing every long-running task: one task per adapter, the
-dispatcher, and the outbound worker. Tasks return `Result<(), TaskFailure>`. An `Ok(())` outside
-cancellation or a panic is treated as a fatal condition: the runtime cancels all tasks, performs the
-shutdown sequence, and returns `RuntimeError::TaskFailed`.
+dispatcher, the outbound worker, and any registered `RuntimeWorker` (added in ADR-0004). Tasks
+return `Result<(), TaskFailure>`. An `Ok(())` outside cancellation or a panic is treated as a fatal
+condition: the runtime cancels all tasks, performs the shutdown sequence, and returns
+`RuntimeError::TaskFailed`.
 
 ### Queues and ordering
 

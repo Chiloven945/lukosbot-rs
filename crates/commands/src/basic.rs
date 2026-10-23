@@ -1,0 +1,10 @@
+pub mod coin;
+pub mod dice;
+pub mod echo;
+pub mod help;
+pub mod luck;
+pub mod ping;
+pub mod random;
+pub mod start;
+pub mod twenty_four;
+pub mod weather;

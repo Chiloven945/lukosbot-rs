@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -19,6 +20,9 @@ use crate::messaging::outbound::{AdapterRegistry, OutboundHandle, OutboundServic
 use crate::ports::{PlatformAdapter, StateStore};
 use crate::runtime::metrics::{MetricsSnapshot, RuntimeMetrics};
 use crate::runtime::task_supervisor::TaskSupervisor;
+use crate::runtime::worker::{RuntimeWorker, WorkerContext};
+
+const RESERVED_TASK_NAMES: [&str; 2] = ["dispatcher", "outbound"];
 
 /// Runtime limits derived from validated configuration.
 #[derive(Debug, Clone, Copy)]
@@ -48,6 +52,8 @@ pub struct RuntimeBuilder {
     handler: Arc<dyn MessageHandler>,
     store: Arc<dyn StateStore>,
     adapters: Vec<Arc<dyn PlatformAdapter>>,
+    workers: Vec<Arc<dyn RuntimeWorker>>,
+    worker_names: HashSet<&'static str>,
     metrics: Arc<RuntimeMetrics>,
 }
 
@@ -62,7 +68,28 @@ impl RuntimeBuilder {
         {
             return Err(RuntimeError::DuplicatePlatform(platform));
         }
+        if self.worker_names.contains(platform.as_str()) {
+            return Err(RuntimeError::DuplicateTaskName(platform.as_str()));
+        }
         self.adapters.push(adapter);
+        Ok(self)
+    }
+
+    /// Registers a supervised long-lived worker.
+    pub fn add_worker(mut self, worker: Arc<dyn RuntimeWorker>) -> Result<Self, RuntimeError> {
+        let name = worker.name();
+        if RESERVED_TASK_NAMES.contains(&name)
+            || self.worker_names.contains(name)
+            || self
+                .adapters
+                .iter()
+                .any(|adapter| adapter.kind().as_str() == name)
+        {
+            return Err(RuntimeError::DuplicateTaskName(name));
+        }
+
+        self.worker_names.insert(name);
+        self.workers.push(worker);
         Ok(self)
     }
 
@@ -77,6 +104,7 @@ impl RuntimeBuilder {
             handler: self.handler,
             store: self.store,
             adapters: self.adapters,
+            workers: self.workers,
             metrics: self.metrics,
         }
     }
@@ -87,6 +115,7 @@ pub struct AppRuntime {
     handler: Arc<dyn MessageHandler>,
     store: Arc<dyn StateStore>,
     adapters: Vec<Arc<dyn PlatformAdapter>>,
+    workers: Vec<Arc<dyn RuntimeWorker>>,
     metrics: Arc<RuntimeMetrics>,
 }
 
@@ -101,6 +130,8 @@ impl AppRuntime {
             handler,
             store,
             adapters: Vec::new(),
+            workers: Vec::new(),
+            worker_names: HashSet::new(),
             metrics: Arc::new(RuntimeMetrics::default()),
         }
     }
@@ -120,6 +151,7 @@ impl AppRuntime {
             handler,
             store,
             adapters,
+            workers,
             metrics,
         } = self;
 
@@ -166,6 +198,12 @@ impl AppRuntime {
             worker.run().await;
             Ok(())
         });
+
+        for worker in &workers {
+            let worker = Arc::clone(worker);
+            let context = WorkerContext::new(outbound.clone(), cancel.child_token());
+            supervisor.spawn(worker.name(), async move { worker.run(context).await });
+        }
 
         for adapter in &adapters {
             let adapter = Arc::clone(adapter);
@@ -379,6 +417,9 @@ pub enum RuntimeError {
 
     #[error("a platform adapter for {0} is already registered")]
     DuplicatePlatform(PlatformKind),
+
+    #[error("a runtime task named `{0}` is already registered")]
+    DuplicateTaskName(&'static str),
 
     #[error(transparent)]
     TaskFailed(#[from] TaskFailure),

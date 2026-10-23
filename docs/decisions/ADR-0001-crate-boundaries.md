@@ -1,6 +1,6 @@
 # ADR-0001: Crate boundaries
 
-- Status: accepted
+- Status: accepted; crate count superseded by ADR-0004
 - Date: 2026-10-23
 
 ## Context
@@ -31,6 +31,10 @@ never wrap SDK objects.
 
 Configuration and telemetry remain modules of `lukosbot-app`. A `lukosbot-command-engine` crate is
 deferred until a real parser subsystem exists.
+
+> **Update (ADR-0004):** the command-engine/commands phase added `lukosbot-command-engine` and
+> `lukosbot-commands`. The workspace now has eight crates; the dependency direction described here
+> is unchanged.
 
 ## Consequences
 

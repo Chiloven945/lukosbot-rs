@@ -6,6 +6,8 @@ members = [
     "crates/infra",
     "crates/platform-telegram",
     "crates/platform-discord",
+    "crates/command-engine",
+    "crates/commands",
     "crates/app",
 ]
 default-members = ["crates/app"]
@@ -34,6 +36,8 @@ lukosbot-core = { version = "0.1.0", path = "crates/core" }
 lukosbot-infra = { version = "0.1.0", path = "crates/infra" }
 lukosbot-platform-telegram = { version = "0.1.0", path = "crates/platform-telegram" }
 lukosbot-platform-discord = { version = "0.1.0", path = "crates/platform-discord" }
+lukosbot-command-engine = { version = "0.1.0", path = "crates/command-engine" }
+lukosbot-commands = { version = "0.1.0", path = "crates/commands" }
 
 # Shared third-party dependencies
 anyhow = "1"

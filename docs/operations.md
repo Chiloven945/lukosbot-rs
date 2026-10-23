@@ -28,6 +28,9 @@ LUKOSBOT__APP__ENVIRONMENT=production
 LUKOSBOT__LOGGING__FORMAT=json
 LUKOSBOT__PLATFORMS__TELEGRAM__TOKEN=...
 LUKOSBOT__STORAGE__SQLITE_PATH=/var/lib/lukosbot/state.sqlite3
+LUKOSBOT__COMMANDS__PREFIX=/
+LUKOSBOT__COMMANDS__BASIC__DICE=false
+LUKOSBOT__COMMANDS__TWENTY_FOUR__TIME_LIMIT_SECS=300
 ```
 
 `RUST_LOG` is consulted when `--log-filter` is absent. Tokens must never be written into the TOML
@@ -88,7 +91,10 @@ client used by future command services uses Rustls and does not depend on OpenSS
 
 ## Known limitations
 
-- No command engine, permissions, policy, media pipeline, or H2 data import yet.
+- Text command engine and basic commands are available; permissions/policy, media pipeline, and H2
+  data import are not yet implemented.
+- `/weather` is a placeholder; `/whois` and other external integrations are not registered.
+- Discord native slash commands are not implemented; use text prefix commands.
 - Adapters support text only for outbound messages; media returns `PlatformError::Unsupported`.
 - Telegram uses long polling (no webhook mode).
 - Discord requires the privileged `MESSAGE_CONTENT` intent.

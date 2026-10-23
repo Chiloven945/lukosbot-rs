@@ -22,5 +22,5 @@ pub use ports::{
 };
 pub use runtime::{
     AppRuntime, MetricsSnapshot, RuntimeBuilder, RuntimeError, RuntimeMetrics, RuntimeSettings,
-    ShutdownReport,
+    RuntimeWorker, ShutdownReport, WorkerContext,
 };

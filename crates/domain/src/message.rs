@@ -57,6 +57,16 @@ impl InboundMessage {
     pub fn has_text(&self) -> bool {
         self.text_parts().any(|text| !text.is_empty())
     }
+
+    /// Returns the first non-blank text part, trimmed.
+    ///
+    /// Platform adapters map both normal message text and media captions into text parts, so this
+    /// is the single text entry point for command processing.
+    pub fn primary_text(&self) -> Option<&str> {
+        self.text_parts()
+            .map(str::trim)
+            .find(|text| !text.is_empty())
+    }
 }
 
 /// One part of an inbound message.
@@ -185,5 +195,30 @@ mod tests {
     fn rejects_invalid_message_ids() {
         assert!(PlatformMessageId::new("").is_err());
         assert!(PlatformMessageId::new("a\tb").is_err());
+    }
+
+    #[test]
+    fn primary_text_skips_blank_parts_and_trims() {
+        let message = text_message(vec![
+            InboundPart::Text("   ".to_owned()),
+            InboundPart::Text("  hello  ".to_owned()),
+        ]);
+
+        assert_eq!(message.primary_text(), Some("hello"));
+    }
+
+    #[test]
+    fn attachment_only_message_has_no_primary_text() {
+        let message = text_message(vec![InboundPart::File(MediaRef {
+            source: MediaSource::PlatformFile {
+                platform: PlatformKind::Discord,
+                file_id: "f".to_owned(),
+            },
+            file_name: None,
+            mime_type: None,
+            size_bytes: None,
+        })]);
+
+        assert_eq!(message.primary_text(), None);
     }
 }

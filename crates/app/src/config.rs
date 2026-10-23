@@ -32,6 +32,7 @@ pub struct AppConfig {
     pub http: HttpSection,
     pub storage: StorageSection,
     pub platforms: PlatformsSection,
+    pub commands: CommandsSection,
 }
 
 #[derive(Debug, Deserialize)]
@@ -168,6 +169,64 @@ impl Default for StorageSection {
             busy_timeout_ms: 5_000,
             max_connections: 5,
             create_parent_dirs: true,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CommandsSection {
+    pub prefix: String,
+    pub basic: BasicCommandSettings,
+    pub twenty_four: TwentyFourSettings,
+}
+
+impl Default for CommandsSection {
+    fn default() -> Self {
+        Self {
+            prefix: "/".to_owned(),
+            basic: BasicCommandSettings::default(),
+            twenty_four: TwentyFourSettings::default(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BasicCommandSettings {
+    pub ping: bool,
+    pub echo: bool,
+    pub coin: bool,
+    pub dice: bool,
+    pub luck: bool,
+    pub twenty_four: bool,
+    pub weather: bool,
+}
+
+impl Default for BasicCommandSettings {
+    fn default() -> Self {
+        Self {
+            ping: true,
+            echo: true,
+            coin: true,
+            dice: true,
+            luck: true,
+            twenty_four: true,
+            weather: true,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TwentyFourSettings {
+    pub time_limit_secs: u64,
+}
+
+impl Default for TwentyFourSettings {
+    fn default() -> Self {
+        Self {
+            time_limit_secs: 300,
         }
     }
 }
@@ -557,6 +616,22 @@ impl AppConfig {
             }
         }
 
+        if self.commands.prefix.is_empty() {
+            issues.push("commands.prefix must not be empty".to_owned());
+        } else if self.commands.prefix.chars().all(char::is_whitespace) {
+            issues.push("commands.prefix must not be only whitespace".to_owned());
+        }
+        if self.commands.prefix.chars().any(char::is_control) {
+            issues.push("commands.prefix must not contain control characters".to_owned());
+        }
+        check_range(
+            &mut issues,
+            "commands.twenty_four.time_limit_secs",
+            self.commands.twenty_four.time_limit_secs,
+            1,
+            3_600,
+        );
+
         if issues.is_empty() {
             Ok(())
         } else {
@@ -634,6 +709,19 @@ impl fmt::Display for ConfigSummary<'_> {
             f,
             "platforms: telegram={} discord={}",
             config.platforms.telegram.enabled, config.platforms.discord.enabled
+        )?;
+        writeln!(
+            f,
+            "commands: prefix={} ping={} echo={} coin={} dice={} luck={} twenty_four={} twenty_four_time_limit={}s weather={}",
+            config.commands.prefix,
+            config.commands.basic.ping,
+            config.commands.basic.echo,
+            config.commands.basic.coin,
+            config.commands.basic.dice,
+            config.commands.basic.luck,
+            config.commands.basic.twenty_four,
+            config.commands.twenty_four.time_limit_secs,
+            config.commands.basic.weather
         )?;
         Ok(())
     }
@@ -897,10 +985,10 @@ token = "super-secret-token"
     fn summary_does_not_contain_secrets() {
         let file = write_config(
             r#"
-[platforms.telegram]
-enabled = true
-token = "super-secret-token"
-"#,
+            [platforms.telegram]
+            enabled = true
+            token = "super-secret-token"
+            "#,
         );
 
         let loaded = load_with(file.path().to_owned(), &[], CliOverrides::default()).unwrap();
@@ -908,5 +996,69 @@ token = "super-secret-token"
 
         assert!(!summary.contains("super-secret-token"));
         assert!(summary.contains("telegram=true"));
+    }
+
+    #[test]
+    fn command_defaults_load_without_a_commands_section() {
+        let loaded = load_with(
+            PathBuf::from("/definitely/missing.toml"),
+            &[],
+            CliOverrides::default(),
+        )
+        .unwrap();
+
+        assert_eq!(loaded.config.commands.prefix, "/");
+        assert!(loaded.config.commands.basic.ping);
+        assert!(loaded.config.commands.basic.twenty_four);
+        assert_eq!(loaded.config.commands.twenty_four.time_limit_secs, 300);
+    }
+
+    #[test]
+    fn environment_overrides_commands() {
+        let loaded = load_with(
+            PathBuf::from("/definitely/missing.toml"),
+            &[
+                ("LUKOSBOT__COMMANDS__PREFIX", "!"),
+                ("LUKOSBOT__COMMANDS__BASIC__DICE", "false"),
+                ("LUKOSBOT__COMMANDS__TWENTY_FOUR__TIME_LIMIT_SECS", "5"),
+            ],
+            CliOverrides::default(),
+        )
+        .unwrap();
+
+        assert_eq!(loaded.config.commands.prefix, "!");
+        assert!(!loaded.config.commands.basic.dice);
+        assert_eq!(loaded.config.commands.twenty_four.time_limit_secs, 5);
+    }
+
+    #[test]
+    fn invalid_command_settings_are_reported() {
+        let file = write_config(
+            r#"
+            [commands]
+            prefix = "   "
+            
+            [commands.twenty_four]
+            time_limit_secs = 0
+            "#,
+        );
+
+        let error = load_with(file.path().to_owned(), &[], CliOverrides::default()).unwrap_err();
+        let issues = error.issues();
+
+        assert!(issues.iter().any(|issue| issue.contains("commands.prefix")));
+        assert!(issues.iter().any(|issue| issue.contains("time_limit_secs")));
+    }
+
+    #[test]
+    fn unknown_command_fields_are_rejected() {
+        let file = write_config(
+            r#"
+            [commands.basic]
+            whois = true
+            "#,
+        );
+
+        assert!(load_with(file.path().to_owned(), &[], CliOverrides::default()).is_err());
     }
 }

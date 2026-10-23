@@ -1664,6 +1664,8 @@ dependencies = [
  "clap",
  "config",
  "dotenvy",
+ "lukosbot-command-engine",
+ "lukosbot-commands",
  "lukosbot-core",
  "lukosbot-infra",
  "lukosbot-platform-discord",
@@ -1675,6 +1677,36 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "lukosbot-command-engine"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "lukosbot-core",
+ "lukosbot-domain",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "lukosbot-commands"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "fastrand",
+ "lukosbot-command-engine",
+ "lukosbot-core",
+ "lukosbot-domain",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

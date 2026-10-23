@@ -35,3 +35,18 @@ token = ""
 [platforms.discord]
 enabled = false
 token = ""
+
+[commands]
+prefix = "/"
+
+[commands.basic]
+ping = true
+echo = true
+coin = true
+dice = true
+luck = true
+twenty_four = true
+weather = true
+
+[commands.twenty_four]
+time_limit_secs = 300

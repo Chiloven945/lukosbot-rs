@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use anyhow::Context;
 
-use lukosbot_core::{AppRuntime, PingHandler, RuntimeSettings, StateStore};
+use lukosbot_command_engine::CommandMessageHandler;
+use lukosbot_commands::{BasicCommandsConfig, RuntimeInfo, TwentyFourService, build_registry};
+use lukosbot_core::{AppRuntime, RuntimeSettings, StateStore};
 use lukosbot_infra::http::{HttpClient, HttpSettings};
 use lukosbot_infra::storage::{SqliteSettings, SqliteStateStore};
 
@@ -38,7 +40,43 @@ pub async fn bootstrap(loaded: LoadedConfig) -> anyhow::Result<Bootstrapped> {
         "shared HTTP client ready"
     );
 
-    let builder = AppRuntime::builder(runtime_settings(&config), Arc::new(PingHandler), store);
+    let runtime_info = Arc::new(RuntimeInfo::new(env!("CARGO_PKG_VERSION")));
+    let (twenty_four_handle, twenty_four_worker) = if config.commands.basic.twenty_four {
+        let (handle, worker) = TwentyFourService::with_prefix(
+            Duration::from_secs(config.commands.twenty_four.time_limit_secs),
+            &config.commands.prefix,
+        )
+        .into_parts();
+        (Some(handle), Some(worker))
+    } else {
+        (None, None)
+    };
+
+    let command_config = BasicCommandsConfig {
+        ping: config.commands.basic.ping,
+        echo: config.commands.basic.echo,
+        coin: config.commands.basic.coin,
+        dice: config.commands.basic.dice,
+        luck: config.commands.basic.luck,
+        twenty_four: config.commands.basic.twenty_four,
+        weather: config.commands.basic.weather,
+    };
+    let registry = build_registry(&command_config, runtime_info, twenty_four_handle)
+        .context("building the command registry")?;
+    let handler = Arc::new(
+        CommandMessageHandler::new(&config.commands.prefix, Arc::new(registry))
+            .context("building the command handler")?,
+    );
+
+    let builder = AppRuntime::builder(runtime_settings(&config), handler, store);
+
+    let builder = if let Some(worker) = twenty_four_worker {
+        builder
+            .add_worker(Arc::new(worker))
+            .context("registering the 24-point worker")?
+    } else {
+        builder
+    };
 
     #[cfg(feature = "telegram")]
     let builder = if config.platforms.telegram.enabled {
@@ -130,13 +168,13 @@ mod tests {
             &config_path,
             format!(
                 r#"
-[storage]
-sqlite_path = "{}"
+                [storage]
+                sqlite_path = "{}"
 
-[platforms.telegram]
-enabled = true
-token = "123:fake-token"
-"#,
+                [platforms.telegram]
+                enabled = true
+                token = "123:fake-token"
+                "#,
                 dir.path().join("state.sqlite3").display()
             ),
         )
@@ -173,14 +211,14 @@ token = "123:fake-token"
             &config_path,
             format!(
                 r#"
-[storage]
-sqlite_path = "{}"
-create_parent_dirs = false
+                [storage]
+                sqlite_path = "{}"
+                create_parent_dirs = false
 
-[platforms.telegram]
-enabled = true
-token = "123:fake-token"
-"#,
+                [platforms.telegram]
+                enabled = true
+                token = "123:fake-token"
+                "#,
                 dir.path().display()
             ),
         )

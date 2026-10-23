@@ -1,0 +1,24 @@
+[package]
+name = "lukosbot-command-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+lukosbot-core.workspace = true
+lukosbot-domain.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true
+lukosbot-core = { workspace = true, features = ["test-util"] }
+tokio.workspace = true

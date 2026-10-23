@@ -64,6 +64,8 @@ cargo test -p lukosbot-core --features test-util
 | SQLite                          | `crates/infra/tests/storage.rs` with temp files       | no                |
 | HTTP                            | `crates/infra/tests/http.rs` with `wiremock`          | no                |
 | Platform mapping                | JSON fixtures in each adapter                         | no                |
+| Command engine                  | `crates/command-engine/tests/engine.rs`               | no                |
+| Built-in commands / 24 actor    | `crates/commands` inline and e2e tests                | no                |
 | Manual end-to-end               | dedicated test bot                                    | yes               |
 
 Never commit real tokens or production data. Do not run a test bot against the same token as a
@@ -77,8 +79,19 @@ production instance: Telegram permits only one long-polling consumer per token.
    export LUKOSBOT__PLATFORMS__TELEGRAM__TOKEN='123456:test-token'
    ```
 2. Start the bot: `cargo run -p lukosbot-app -- run`.
-3. Send `ping` in a private chat; the bot replies `pong`.
-4. Press Ctrl-C; the process should exit within `app.shutdown_timeout_secs`.
+3. Send these prefix commands in a private chat:
+   ```text
+   /ping
+   /echo hello world
+   /dice 3
+   /luck
+   /help
+   /24
+   ```
+   Bare `ping` is intentionally ignored. `/start` is callable but hidden from help. `/weather`
+   reports that the integration is not available yet.
+4. For `/24`, submit an expression, use `/24 giveup`, or wait for the configured timeout.
+5. Press Ctrl-C; the process should exit within `app.shutdown_timeout_secs`.
 
 ## Manual Discord test
 
@@ -89,8 +102,9 @@ production instance: Telegram permits only one long-polling consumer per token.
    export LUKOSBOT__PLATFORMS__DISCORD__TOKEN='test-token'
    cargo run -p lukosbot-app -- run
    ```
-4. Send `ping` in a channel the bot can read; it replies `pong`.
-5. Stop with Ctrl-C and confirm a clean exit.
+4. Send `/ping`, `/echo hello world`, `/dice 3`, and `/help` in a channel the bot can read. These
+   are text prefix commands, not native Discord slash commands.
+5. Confirm ordinary chat text is ignored, then stop with Ctrl-C and confirm a clean exit.
 
 ## Debugging
 
