@@ -24,6 +24,7 @@ fn message(kind: ChatKind, nsfw: Option<bool>) -> InboundMessage {
         received_at: Utc::now(),
         parts: vec![InboundPart::Text("/test".to_owned())],
         reply_to: None,
+        quoted: None,
         context: MessageContext::new(nsfw),
     }
 }

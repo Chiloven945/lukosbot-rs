@@ -190,6 +190,24 @@ The Discord gateway uses the system TLS implementation through `native-tls` (Ope
 Install the OpenSSL runtime (`libssl3` on Debian/Ubuntu) alongside the binary. The shared HTTP
 client used by integration commands uses Rustls and does not depend on OpenSSL.
 
+## Media and web services
+
+`[media]` bounds downloads, uploads, thumbnails, image pixels, and concurrent downloads. Media
+downloads require exact host allowlists and reject private/loopback/link-local/mapped addresses.
+Cave image payloads are Base64-encoded in the existing state store and are bounded by
+`media.max_download_bytes`.
+
+`[integrations.e621]` controls the API User-Agent, request interval, and page size. E621 public
+reads are anonymous: no API key or Basic auth is sent. Requests are paced at one per second, and
+429/503 responses are treated as rate limiting. E621 rating policy is enforced locally before output
+and before thumbnail downloads. Set `e621.rating` policy values to `s`, `q`, and/or `e`.
+
+`http.proxy` must be configured when the deployment requires an egress proxy; environment proxy
+variables are not auto-detected. `[web]` controls static HTML/Markdown limits and redirects. Wiki screenshots additionally require
+`web.browser.enabled = true` and a reachable WebDriver endpoint. Run that browser in an isolated
+network; do not expose the bot host's internal network or cloud metadata service to arbitrary web
+pages. `check-config` validates the endpoint URL but never connects to it.
+
 ## Logging
 
 - `logging.format = "json"` for log collectors; `"pretty"` or `"compact"` for terminals.
@@ -200,13 +218,17 @@ client used by integration commands uses Rustls and does not depend on OpenSSL.
 
 ## Known limitations
 
-- `/github`, `/bilibili`, `/ip`, `/music`, and `/whois` are available when their
-  `[commands.integrations]` flag is enabled. `/weather` remains a placeholder.
-- Minecraft, wiki/web rendering, media download/grid, and service scheduling are not implemented.
+- `/github`, `/bilibili`, `/ip`, `/music`, `/whois`, `/cave`, `/e621`, `/wiki` and `/mcwiki` are
+  available when their command flags are enabled. `/weather` remains a placeholder.
+- Service scheduling is not implemented.
 - No production `StateDefinition` is registered yet, so `/pref list` is intentionally empty outside
   tests. `/pref` is a framework, not a claim that JVM preference items have been migrated.
 - Discord native slash commands are not implemented; use text prefix commands.
-- Adapters support text only for outbound messages; media returns `PlatformError::Unsupported`.
+- Telegram/Discord adapters support text, one image, or one file per outbound message.
+- Wiki screenshots require `web.browser.enabled = true` with a reachable WebDriver endpoint and an
+  isolated Chromium/Chrome service. Static Wiki Markdown and Minecraft summaries do not.
+- E621 thumbnails and media downloads require egress access; private/loopback addresses and
+  non-allowlisted hosts are rejected.
 - Telegram uses long polling (no webhook mode).
 - Discord requires the privileged `MESSAGE_CONTENT` intent, and chat-admin checks require the
   relevant guild/channel/member data to be present in the gateway cache.

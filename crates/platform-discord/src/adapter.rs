@@ -6,13 +6,13 @@ use async_trait::async_trait;
 use lukosbot_core::auth::{ChatAdminLookupError, ChatAdminResolver};
 use lukosbot_core::{InboundSender, PlatformAdapter, PlatformError};
 use lukosbot_domain::{
-    ChatAddress, ChatKind, InboundMessage, OutboundMessage, OutboundPart, PlatformKind,
-    PlatformMessageId, SentMessage,
+    ChatAddress, ChatKind, InboundMessage, MediaRef, MediaSource, OutboundMessage, OutboundPart,
+    PlatformKind, PlatformMessageId, SentMessage,
 };
 use secrecy::{ExposeSecret, SecretString};
 use serenity::all::{
-    ChannelId, Client, Context, CreateMessage, EventHandler, GatewayIntents, GuildId, Http,
-    Message, ShardManager,
+    ChannelId, Client, Context, CreateAttachment, CreateMessage, EventHandler, GatewayIntents,
+    GuildId, Http, Message, ShardManager,
 };
 use serenity::async_trait as serenity_async_trait;
 use tokio_util::sync::CancellationToken;
@@ -99,14 +99,6 @@ impl PlatformAdapter for DiscordAdapter {
             });
         }
 
-        let text = text_content(&message)?;
-        if text.is_empty() {
-            return Err(PlatformError::Api {
-                platform: PLATFORM,
-                message: "outbound message has no text".to_owned(),
-            });
-        }
-
         let channel_id =
             target.chat_id.as_str().parse::<u64>().map_err(|error| {
                 mapping_error(format!("channel id `{}`: {error}", target.chat_id))
@@ -116,21 +108,72 @@ impl PlatformAdapter for DiscordAdapter {
             return Err(mapping_error("channel id must not be zero"));
         }
 
+        let mut text_parts = Vec::new();
+        let mut media: Option<(&MediaRef, Option<&str>)> = None;
+        for part in &message.parts {
+            match part {
+                OutboundPart::Text(text) => text_parts.push(text.as_str()),
+                OutboundPart::Image {
+                    media: image,
+                    caption,
+                } => {
+                    if media.is_some() {
+                        return Err(PlatformError::Api {
+                            platform: PLATFORM,
+                            message: "an outbound message may contain only one media part"
+                                .to_owned(),
+                        });
+                    }
+                    media = Some((image, caption.as_deref()));
+                }
+                OutboundPart::File {
+                    media: file,
+                    caption,
+                } => {
+                    if media.is_some() {
+                        return Err(PlatformError::Api {
+                            platform: PLATFORM,
+                            message: "an outbound message may contain only one media part"
+                                .to_owned(),
+                        });
+                    }
+                    media = Some((file, caption.as_deref()));
+                }
+            }
+        }
+
+        let mut content = join_caption(
+            &text_parts.join("\n"),
+            media.and_then(|(_, caption)| caption),
+        );
+        if content
+            .as_ref()
+            .is_some_and(|text| text.chars().count() > 2000)
+        {
+            return Err(PlatformError::Api {
+                platform: PLATFORM,
+                message: "Discord message content must not exceed 2000 characters".to_owned(),
+            });
+        }
+
+        let mut create = CreateMessage::new();
+        if let Some(text) = content.take() {
+            create = create.content(text);
+        }
+        if let Some((media, _)) = media {
+            let bytes = materialized_bytes(media, "file")?;
+            let filename = safe_filename(media.file_name.as_deref());
+            create = create.add_file(CreateAttachment::bytes(bytes, filename));
+        }
+
         let sent = ChannelId::new(channel_id)
-            .send_message(&*self.http, CreateMessage::new().content(text))
+            .send_message(&*self.http, create)
             .await
             .map_err(|error| PlatformError::Api {
                 platform: PLATFORM,
                 message: error.to_string(),
             })?;
-
-        let message_id = PlatformMessageId::new(sent.id.get().to_string())
-            .map_err(|error| mapping_error(format!("sent message id: {error}")))?;
-
-        Ok(SentMessage {
-            platform: PLATFORM,
-            message_id,
-        })
+        sent_message(sent)
     }
 
     async fn shutdown(&self) -> Result<(), PlatformError> {
@@ -233,28 +276,55 @@ impl ChatAdminResolver for DiscordAdapter {
     }
 }
 
-fn text_content(message: &OutboundMessage) -> Result<String, PlatformError> {
-    let mut chunks = Vec::with_capacity(message.parts.len());
-
-    for part in &message.parts {
-        match part {
-            OutboundPart::Text(text) => chunks.push(text.as_str()),
-            OutboundPart::Image { .. } => {
-                return Err(PlatformError::Unsupported {
-                    platform: PLATFORM,
-                    part: "image",
-                });
-            }
-            OutboundPart::File { .. } => {
-                return Err(PlatformError::Unsupported {
-                    platform: PLATFORM,
-                    part: "file",
-                });
-            }
-        }
+fn materialized_bytes(media: &MediaRef, part: &'static str) -> Result<Vec<u8>, PlatformError> {
+    match &media.source {
+        MediaSource::Bytes(bytes) => Ok(bytes.to_vec()),
+        _ => Err(PlatformError::Unsupported {
+            platform: PLATFORM,
+            part,
+        }),
     }
+}
 
-    Ok(chunks.join("\n"))
+fn join_caption(text: &str, caption: Option<&str>) -> Option<String> {
+    match (
+        text.is_empty(),
+        caption.is_some_and(|caption| !caption.is_empty()),
+    ) {
+        (true, false) => None,
+        (false, false) => Some(text.to_owned()),
+        (true, true) => caption.map(str::to_owned),
+        (false, true) => Some(format!("{text}\n{}", caption.unwrap_or_default())),
+    }
+}
+
+fn safe_filename(file_name: Option<&str>) -> String {
+    let name = file_name
+        .unwrap_or("attachment.bin")
+        .chars()
+        .map(|character| {
+            if character.is_control() || matches!(character, '/' | '\\') {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    let name = name.trim_matches(['.', ' ']);
+    if name.is_empty() {
+        "attachment.bin".to_owned()
+    } else {
+        name.chars().take(120).collect()
+    }
+}
+
+fn sent_message(message: Message) -> Result<SentMessage, PlatformError> {
+    let message_id = PlatformMessageId::new(message.id.get().to_string())
+        .map_err(|error| mapping_error(format!("sent message id: {error}")))?;
+    Ok(SentMessage {
+        platform: PLATFORM,
+        message_id,
+    })
 }
 
 fn mapping_error(message: impl Into<String>) -> PlatformError {

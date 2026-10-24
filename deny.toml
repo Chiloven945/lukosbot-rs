@@ -5,6 +5,9 @@ ignore = [
     # teloxide -> aquamarine -> proc-macro-error2. This is a compile-time-only proc macro;
     # the crate is unmaintained but no runtime component is linked into the application.
     { id = "RUSTSEC-2026-0173", reason = "compile-time proc macro with no safe upgrade and no runtime exposure" },
+    # cosmic-text -> fontdb currently pulls ttf-parser. Fonts are loaded from operator-controlled
+    # system/config directories, not from user-supplied web content or uploaded files.
+    { id = "RUSTSEC-2026-0192", reason = "fontdb/ttf-parser is used only for operator-controlled fonts; no safe upgrade is available through cosmic-text 0.19" },
 ]
 
 [licenses]

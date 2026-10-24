@@ -7,10 +7,14 @@ use lukosbot_command_engine::{CommandRegistry, CommandRegistryBuilder, CommandRe
 use crate::basic;
 use crate::basic::random::{RandomSource, ThreadRandom};
 use crate::basic::twenty_four::TwentyFourHandle;
-use crate::config::{BasicCommandsConfig, ThirdPartyCommandsConfig};
+use crate::config::{
+    BasicCommandsConfig, MediaCommandsConfig, ThirdPartyCommandsConfig, WebCommandsConfig,
+};
 use crate::control::ControlCommands;
 use crate::integrations::IntegrationCommandServices;
+use crate::media::MediaCommandServices;
 use crate::runtime_info::RuntimeInfo;
+use crate::web::WebCommandServices;
 
 /// A failure while assembling the command registry.
 #[derive(Debug, Error)]
@@ -29,11 +33,15 @@ pub enum CommandBuildError {
 /// All inputs needed to build the full command registry.
 pub struct RegistryBuildDependencies {
     pub basic: BasicCommandsConfig,
+    pub media: MediaCommandsConfig,
+    pub web: WebCommandsConfig,
     pub third_party: ThirdPartyCommandsConfig,
     pub runtime_info: Arc<RuntimeInfo>,
     pub twenty_four: Option<TwentyFourHandle>,
     pub controls: ControlCommands,
     pub services: IntegrationCommandServices,
+    pub media_services: MediaCommandServices,
+    pub web_services: WebCommandServices,
 }
 
 /// Builds the built-in command registry without optional control or integration commands.
@@ -62,11 +70,15 @@ pub fn build_registry_with_controls(
 ) -> Result<CommandRegistry, CommandBuildError> {
     build_registry_with_dependencies(RegistryBuildDependencies {
         basic: *config,
+        media: MediaCommandsConfig::all_disabled(),
+        web: WebCommandsConfig::all_disabled(),
         third_party: ThirdPartyCommandsConfig::all_disabled(),
         runtime_info,
         twenty_four,
         controls,
         services: IntegrationCommandServices::default(),
+        media_services: MediaCommandServices::default(),
+        web_services: WebCommandServices::default(),
     })
 }
 
@@ -76,11 +88,15 @@ pub fn build_registry_with_dependencies(
 ) -> Result<CommandRegistry, CommandBuildError> {
     let RegistryBuildDependencies {
         basic: config,
+        media,
+        web,
         third_party,
         runtime_info,
         twenty_four,
         controls,
         services,
+        media_services,
+        web_services,
     } = dependencies;
 
     let mut builder = CommandRegistryBuilder::new();
@@ -141,13 +157,68 @@ pub fn build_registry_with_dependencies(
                 command: "pref",
                 dependency: "StateService",
             })?;
-        let authorization = controls
-            .authorization
-            .ok_or(CommandBuildError::MissingDependency {
-                command: "pref",
-                dependency: "AuthorizationService",
-            })?;
+        let authorization =
+            controls
+                .authorization
+                .clone()
+                .ok_or(CommandBuildError::MissingDependency {
+                    command: "pref",
+                    dependency: "AuthorizationService",
+                })?;
         builder.register(crate::pref::definition(states, authorization))?;
+    }
+
+    if media.cave {
+        let service = media_services
+            .cave
+            .ok_or(CommandBuildError::MissingDependency {
+                command: "cave",
+                dependency: "CaveService",
+            })?;
+        let authorization =
+            controls
+                .authorization
+                .clone()
+                .ok_or(CommandBuildError::MissingDependency {
+                    command: "cave",
+                    dependency: "AuthorizationService",
+                })?;
+        let max_image_bytes = service.max_image_bytes();
+        builder.register(
+            crate::media::cave::CaveCommand::new(service, authorization, max_image_bytes)
+                .into_definition(),
+        )?;
+    }
+
+    if media.e621 {
+        let limit = media_services.e621_limit;
+        let service = media_services
+            .e621
+            .ok_or(CommandBuildError::MissingDependency {
+                command: "e621",
+                dependency: "E621Service",
+            })?;
+        builder.register(
+            crate::media::e621::E621Command::new(service, limit.max(1)).into_definition(),
+        )?;
+    }
+
+    if web.wiki || web.mcwiki {
+        let service = web_services
+            .wiki
+            .ok_or(CommandBuildError::MissingDependency {
+                command: "wiki",
+                dependency: "WikiService",
+            })?;
+        if web.wiki {
+            builder.register(
+                crate::web::wiki::WikiCommand::wikipedia(Arc::clone(&service)).into_definition(),
+            )?;
+        }
+        if web.mcwiki {
+            builder
+                .register(crate::web::wiki::WikiCommand::minecraft(service).into_definition())?;
+        }
     }
 
     if third_party.github {
@@ -264,11 +335,15 @@ mod tests {
                 twenty_four: false,
                 ..BasicCommandsConfig::default()
             },
+            media: MediaCommandsConfig::all_disabled(),
+            web: WebCommandsConfig::all_disabled(),
             third_party: ThirdPartyCommandsConfig::all_disabled(),
             runtime_info: Arc::new(RuntimeInfo::new("test")),
             twenty_four: None,
             controls: ControlCommands::default(),
             services: IntegrationCommandServices::default(),
+            media_services: MediaCommandServices::default(),
+            web_services: WebCommandServices::default(),
         })
         .unwrap();
 
@@ -287,6 +362,8 @@ mod tests {
                 twenty_four: false,
                 ..BasicCommandsConfig::default()
             },
+            media: MediaCommandsConfig::all_disabled(),
+            web: WebCommandsConfig::all_disabled(),
             third_party: ThirdPartyCommandsConfig {
                 github: true,
                 ..ThirdPartyCommandsConfig::all_disabled()
@@ -295,6 +372,8 @@ mod tests {
             twenty_four: None,
             controls: ControlCommands::default(),
             services: IntegrationCommandServices::default(),
+            media_services: MediaCommandServices::default(),
+            web_services: WebCommandServices::default(),
         }) {
             Ok(_) => panic!("github requires a service"),
             Err(error) => error,

@@ -4,6 +4,7 @@
 //! `lukosbot-integrations`.
 
 pub mod bilibili;
+pub mod e621;
 pub mod github;
 pub mod ip;
 pub mod music;

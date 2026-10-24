@@ -103,6 +103,158 @@ impl AppConfig {
             86_400,
         );
 
+        check_range(
+            &mut issues,
+            "media.max_download_bytes",
+            self.media.max_download_bytes,
+            1_024,
+            1_073_741_824,
+        );
+        check_range(
+            &mut issues,
+            "media.max_upload_bytes",
+            self.media.max_upload_bytes,
+            1_024,
+            1_073_741_824,
+        );
+        check_range(
+            &mut issues,
+            "media.max_thumbnail_bytes",
+            self.media.max_thumbnail_bytes,
+            1_024,
+            1_073_741_824,
+        );
+        check_range(
+            &mut issues,
+            "media.max_image_pixels",
+            self.media.max_image_pixels,
+            1,
+            1_000_000_000,
+        );
+        check_range(
+            &mut issues,
+            "media.max_concurrent_downloads",
+            self.media.max_concurrent_downloads as u64,
+            1,
+            32,
+        );
+        check_range(
+            &mut issues,
+            "media.rendering.max_grid_posts",
+            u64::from(self.media.rendering.max_grid_posts),
+            1,
+            12,
+        );
+        check_range(
+            &mut issues,
+            "media.rendering.max_render_pixels",
+            self.media.rendering.max_render_pixels,
+            1,
+            100_000_000,
+        );
+
+        check_range(
+            &mut issues,
+            "web.request_timeout_secs",
+            self.web.request_timeout_secs,
+            1,
+            120,
+        );
+        check_range(
+            &mut issues,
+            "web.max_html_bytes",
+            self.web.max_html_bytes,
+            1_024,
+            1_073_741_824,
+        );
+        check_range(
+            &mut issues,
+            "web.max_markdown_bytes",
+            self.web.max_markdown_bytes,
+            1_024,
+            1_073_741_824,
+        );
+        check_range(
+            &mut issues,
+            "web.max_redirects",
+            u64::from(self.web.max_redirects),
+            0,
+            10,
+        );
+        if self.web.user_agent.trim().is_empty() {
+            issues.push("web.user_agent must not be empty".to_owned());
+        }
+        check_range(
+            &mut issues,
+            "web.browser.page_load_timeout_secs",
+            self.web.browser.page_load_timeout_secs,
+            1,
+            120,
+        );
+        check_range(
+            &mut issues,
+            "web.browser.job_timeout_secs",
+            self.web.browser.job_timeout_secs,
+            1,
+            300,
+        );
+        check_range(
+            &mut issues,
+            "web.browser.queue_capacity",
+            self.web.browser.queue_capacity as u64,
+            1,
+            64,
+        );
+        check_range(
+            &mut issues,
+            "web.browser.full_page_width",
+            u64::from(self.web.browser.full_page_width),
+            320,
+            4_096,
+        );
+        check_range(
+            &mut issues,
+            "web.browser.full_page_max_height",
+            u64::from(self.web.browser.full_page_max_height),
+            320,
+            32_768,
+        );
+        check_range(
+            &mut issues,
+            "web.browser.wiki_intro_width",
+            u64::from(self.web.browser.wiki_intro_width),
+            320,
+            4_096,
+        );
+        if self.web.browser.enabled {
+            let valid = url::Url::parse(&self.web.browser.webdriver_url).is_ok_and(|url| {
+                matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
+            });
+            if !valid {
+                issues.push(
+                    "web.browser.webdriver_url must be a valid http(s) URL with a host".to_owned(),
+                );
+            }
+        }
+
+        check_range(
+            &mut issues,
+            "integrations.e621.request_interval_ms",
+            self.integrations.e621.request_interval_ms,
+            0,
+            60_000,
+        );
+        check_range(
+            &mut issues,
+            "integrations.e621.max_results_per_page",
+            u64::from(self.integrations.e621.max_results_per_page),
+            1,
+            12,
+        );
+        if self.integrations.e621.user_agent.trim().is_empty() {
+            issues.push("integrations.e621.user_agent must not be empty".to_owned());
+        }
+
         if let Err(mut security_issues) = self.security.compile() {
             issues.append(&mut security_issues);
         }

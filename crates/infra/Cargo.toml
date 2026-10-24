@@ -12,17 +12,22 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+bytes.workspace = true
 chrono.workspace = true
 fastrand.workspace = true
+htmd.workspace = true
 idna.workspace = true
+image.workspace = true
 lukosbot-core.workspace = true
 lukosbot-domain.workspace = true
 lukosbot-integrations.workspace = true
 reqwest.workspace = true
+scraper.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
+thirtyfour.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

@@ -87,6 +87,7 @@ fn inbound(text: &str, kind: ChatKind) -> InboundMessage {
         received_at: Utc::now(),
         parts: vec![InboundPart::Text(text.to_owned())],
         reply_to: None,
+        quoted: None,
         context: MessageContext::default(),
     }
 }

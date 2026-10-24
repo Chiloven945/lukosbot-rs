@@ -1,14 +1,17 @@
 //! Dependency assembly: configuration -> infrastructure -> adapters -> runtime.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
 
 use lukosbot_command_engine::CommandMessageHandler;
+use lukosbot_commands::media::cave::CaveService;
 use lukosbot_commands::{
-    BasicCommandsConfig, ControlCommands, IntegrationCommandServices, RegistryBuildDependencies,
-    RuntimeInfo, ThirdPartyCommandsConfig, TwentyFourService, build_registry_with_dependencies,
+    BasicCommandsConfig, ControlCommands, IntegrationCommandServices, MediaCommandServices,
+    MediaCommandsConfig, RegistryBuildDependencies, RuntimeInfo, ThirdPartyCommandsConfig,
+    TwentyFourService, WebCommandServices, WebCommandsConfig, build_registry_with_dependencies,
 };
 use lukosbot_core::auth::{AuthorizationService, BotAdminService, ChatAdminResolver};
 use lukosbot_core::policy::{CommandPolicy, PolicyEngine};
@@ -16,11 +19,16 @@ use lukosbot_core::state::{StateMaintenanceWorker, StateRegistry, StateService};
 use lukosbot_core::{AppRuntime, PlatformAdapter, RuntimeSettings, StateStore};
 use lukosbot_infra::http::{HttpClient, HttpSettings, RedirectMode};
 use lukosbot_infra::integrations::bilibili::BilibiliClient;
+use lukosbot_infra::integrations::e621::E621Client;
 use lukosbot_infra::integrations::github::GitHubClient;
 use lukosbot_infra::integrations::ip::IpLookupClient;
 use lukosbot_infra::integrations::music::MusicClient;
 use lukosbot_infra::integrations::whois::{WhoisClient, WhoisSettings};
+use lukosbot_infra::media::HttpMediaLoader;
 use lukosbot_infra::storage::{SqliteSettings, SqliteStateStore};
+use lukosbot_infra::web::WebSettings;
+use lukosbot_infra::web::screenshot::{ScreenshotSettings, ScreenshotWorker};
+use lukosbot_infra::web::wiki::WikiClient;
 
 use crate::config::{AppConfig, LoadedConfig};
 
@@ -121,6 +129,15 @@ pub async fn bootstrap(loaded: LoadedConfig) -> anyhow::Result<Bootstrapped> {
         Arc::clone(&state_registry),
     ));
 
+    let adapter_map = adapters
+        .iter()
+        .map(|adapter| (adapter.kind(), Arc::clone(adapter)))
+        .collect::<HashMap<_, _>>();
+    let media_loader = Arc::new(HttpMediaLoader::new(
+        Arc::clone(&no_redirect_http),
+        adapter_map,
+    ));
+
     let runtime_info = Arc::new(RuntimeInfo::new(env!("CARGO_PKG_VERSION")));
     let (twenty_four_handle, twenty_four_worker) = if config.commands.basic.twenty_four {
         let (handle, worker) = TwentyFourService::with_prefix(
@@ -181,6 +198,13 @@ pub async fn bootstrap(loaded: LoadedConfig) -> anyhow::Result<Bootstrapped> {
         total_timeout: Duration::from_secs(config.integrations.whois.total_timeout_secs),
         max_response_bytes: config.integrations.whois.max_response_bytes,
     });
+    let e621 = E621Client::with_user_agent(
+        Arc::clone(&http),
+        config.integrations.e621.user_agent.clone(),
+    )
+    .with_interval(Duration::from_millis(
+        config.integrations.e621.request_interval_ms,
+    ));
 
     let services = IntegrationCommandServices {
         github: Some(Arc::new(github)),
@@ -189,8 +213,53 @@ pub async fn bootstrap(loaded: LoadedConfig) -> anyhow::Result<Bootstrapped> {
         music: Some(Arc::new(music)),
         whois: Some(Arc::new(whois)),
     };
+    let cave = Arc::new(CaveService::new(
+        Arc::clone(&store),
+        config.media.max_download_bytes,
+    ));
+    let media_services = MediaCommandServices {
+        cave: Some(cave),
+        e621: Some(Arc::new(e621)),
+        e621_limit: u32::from(config.integrations.e621.max_results_per_page),
+    };
+    let mut wiki = WikiClient::new(
+        Arc::clone(&no_redirect_http),
+        WebSettings {
+            request_timeout: Duration::from_secs(config.web.request_timeout_secs),
+            max_html_bytes: config.web.max_html_bytes,
+            max_markdown_bytes: config.web.max_markdown_bytes,
+            max_redirects: usize::from(config.web.max_redirects),
+            user_agent: config.web.user_agent.clone(),
+        },
+    );
+    let (screenshot_handle, screenshot_worker) = if config.web.browser.enabled {
+        let (handle, worker) = ScreenshotWorker::new(ScreenshotSettings {
+            webdriver_url: config.web.browser.webdriver_url.clone(),
+            page_load_timeout: Duration::from_secs(config.web.browser.page_load_timeout_secs),
+            job_timeout: Duration::from_secs(config.web.browser.job_timeout_secs),
+            queue_capacity: config.web.browser.queue_capacity,
+            wiki_intro_width: config.web.browser.wiki_intro_width,
+            intro_height: 1_600,
+        });
+        (Some(handle), Some(worker))
+    } else {
+        (None, None)
+    };
+    if let Some(handle) = screenshot_handle {
+        wiki = wiki.with_screenshot(handle);
+    }
+    let wiki = Arc::new(wiki);
+    let web_services = WebCommandServices { wiki: Some(wiki) };
     let registry = build_registry_with_dependencies(RegistryBuildDependencies {
         basic: command_config,
+        media: MediaCommandsConfig {
+            cave: config.commands.media.cave,
+            e621: config.commands.media.e621,
+        },
+        web: WebCommandsConfig {
+            wiki: config.commands.web.wiki,
+            mcwiki: config.commands.web.mcwiki,
+        },
         third_party: ThirdPartyCommandsConfig {
             github: config.commands.integrations.github,
             bilibili: config.commands.integrations.bilibili,
@@ -202,6 +271,8 @@ pub async fn bootstrap(loaded: LoadedConfig) -> anyhow::Result<Bootstrapped> {
         twenty_four: twenty_four_handle,
         controls,
         services,
+        media_services,
+        web_services,
     })
     .context("building the command registry")?;
 
@@ -210,12 +281,19 @@ pub async fn bootstrap(loaded: LoadedConfig) -> anyhow::Result<Bootstrapped> {
             .context("building the command handler")?,
     );
 
-    let mut builder = AppRuntime::builder(runtime_settings(&config), handler, Arc::clone(&store));
+    let mut builder = AppRuntime::builder(runtime_settings(&config), handler, Arc::clone(&store))
+        .with_media_loader(media_loader);
 
     if let Some(worker) = twenty_four_worker {
         builder = builder
             .add_worker(Arc::new(worker))
             .context("registering the 24-point worker")?;
+    }
+
+    if let Some(worker) = screenshot_worker {
+        builder = builder
+            .add_worker(Arc::new(worker))
+            .context("registering the screenshot worker")?;
     }
 
     if config.storage.expiry_cleanup_interval_secs > 0 {

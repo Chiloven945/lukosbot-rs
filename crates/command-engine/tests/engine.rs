@@ -8,8 +8,9 @@ use tokio_util::sync::CancellationToken;
 
 use lukosbot_command_engine::{
     ArgType, ArgsSpec, CommandContext, CommandDefinition, CommandError, CommandExecutor,
-    CommandInvocation, CommandMessageHandler, CommandRegistry, CommandRegistryBuilder, InputSpec,
-    PositionalSpec, lexer, parse_args,
+    CommandInvocation, CommandMessageHandler, CommandNode, CommandRegistry, CommandRegistryBuilder,
+    InputSpec, PositionalSpec, SyntaxLine, SyntaxPart, UsageMetadata, help::render_command, lexer,
+    parse_args,
 };
 use lukosbot_core::policy::AllowAllPolicy;
 use lukosbot_core::testing::{MemoryStateStore, RecordingAdapter};
@@ -84,6 +85,7 @@ fn inbound(text: &str) -> InboundMessage {
         received_at: Utc::now(),
         parts: vec![InboundPart::Text(text.to_owned())],
         reply_to: None,
+        quoted: None,
         context: Default::default(),
     }
 }
@@ -463,4 +465,27 @@ fn root_and_child_aliases_resolve_case_insensitively() {
 
     let child = registry.resolve("PING N").unwrap().unwrap();
     assert_eq!(child.path, vec!["ping", "now"]);
+}
+
+#[test]
+fn explicit_root_syntax_suppresses_duplicate_child_auto_syntax() {
+    let definition = CommandDefinition::new("sample", "sample", InputSpec::NoArgs, noop())
+        .child(CommandNode::leaf("one", "one", InputSpec::NoArgs, noop()))
+        .usage(UsageMetadata {
+            syntaxes: vec![SyntaxLine::described(
+                "run one",
+                [
+                    SyntaxPart::Literal("one".to_owned()),
+                    SyntaxPart::Argument {
+                        name: "name".to_owned(),
+                        optional: false,
+                    },
+                ],
+            )],
+            ..UsageMetadata::default()
+        });
+
+    let text = render_command(&definition, "/");
+    assert_eq!(text.matches("/sample one <name>").count(), 1);
+    assert!(!text.contains("/sample one\n"));
 }

@@ -6,8 +6,10 @@ use tokio_util::sync::CancellationToken;
 use lukosbot_core::handler::HandlerContext;
 use lukosbot_core::messaging::outbound::SendError;
 use lukosbot_core::policy::CommandPolicy;
-use lukosbot_core::ports::StateStore;
-use lukosbot_domain::{ChatAddress, InboundMessage, OutboundMessage, Sender, SentMessage};
+use lukosbot_core::ports::{MediaLoadError, MediaLoadPolicy, MediaLoader, StateStore};
+use lukosbot_domain::{
+    ChatAddress, InboundMessage, MediaContent, MediaRef, OutboundMessage, Sender, SentMessage,
+};
 
 use crate::registry::CommandRegistry;
 
@@ -64,6 +66,18 @@ impl<'a> CommandContext<'a> {
         self.handler.state()
     }
 
+    pub fn media(&self) -> &Arc<dyn MediaLoader> {
+        self.handler.media()
+    }
+
+    pub async fn load_media(
+        &self,
+        reference: &MediaRef,
+        policy: MediaLoadPolicy,
+    ) -> Result<MediaContent, MediaLoadError> {
+        self.handler.media().load(reference, policy).await
+    }
+
     pub fn cancellation(&self) -> &CancellationToken {
         self.handler.cancel()
     }
@@ -80,9 +94,14 @@ impl<'a> CommandContext<'a> {
 
     /// Sends a text reply to the chat that produced the current message.
     pub async fn reply_text(&self, text: impl Into<String>) -> Result<SentMessage, SendError> {
+        self.reply_message(OutboundMessage::text(text)).await
+    }
+
+    /// Sends an arbitrary outbound message to the chat that produced the current message.
+    pub async fn reply_message(&self, message: OutboundMessage) -> Result<SentMessage, SendError> {
         self.handler
             .outbound()
-            .send(self.message.address.clone(), OutboundMessage::text(text))
+            .send(self.message.address.clone(), message)
             .await
     }
 }

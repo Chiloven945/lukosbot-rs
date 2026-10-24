@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use lukosbot_domain::{ChatAddress, InboundMessage, OutboundMessage, PlatformKind, SentMessage};
+use lukosbot_domain::{
+    ChatAddress, InboundMessage, MediaContent, OutboundMessage, PlatformKind, SentMessage,
+};
 
 use crate::error::BoxError;
 
@@ -36,6 +38,16 @@ pub trait PlatformAdapter: Send + Sync {
         target: &ChatAddress,
         message: OutboundMessage,
     ) -> Result<SentMessage, PlatformError>;
+
+    /// Downloads a platform file identifier into memory.
+    ///
+    /// Adapters that cannot resolve platform files keep the fail-closed default.
+    async fn load_platform_file(&self, _file_id: &str) -> Result<MediaContent, PlatformError> {
+        Err(PlatformError::Unsupported {
+            platform: self.kind(),
+            part: "platform file download",
+        })
+    }
 
     async fn shutdown(&self) -> Result<(), PlatformError>;
 }

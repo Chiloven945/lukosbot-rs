@@ -17,7 +17,7 @@ use crate::error::TaskFailure;
 use crate::handler::{HandlerContext, MessageHandler};
 use crate::messaging::dispatcher::Dispatcher;
 use crate::messaging::outbound::{AdapterRegistry, OutboundHandle, OutboundService};
-use crate::ports::{PlatformAdapter, StateStore};
+use crate::ports::{MediaLoader, PlatformAdapter, StateStore, UnsupportedMediaLoader};
 use crate::runtime::metrics::{MetricsSnapshot, RuntimeMetrics};
 use crate::runtime::task_supervisor::TaskSupervisor;
 use crate::runtime::worker::{RuntimeWorker, WorkerContext};
@@ -51,6 +51,7 @@ pub struct RuntimeBuilder {
     settings: RuntimeSettings,
     handler: Arc<dyn MessageHandler>,
     store: Arc<dyn StateStore>,
+    media: Arc<dyn MediaLoader>,
     adapters: Vec<Arc<dyn PlatformAdapter>>,
     workers: Vec<Arc<dyn RuntimeWorker>>,
     worker_names: HashSet<&'static str>,
@@ -98,11 +99,17 @@ impl RuntimeBuilder {
         self
     }
 
+    pub fn with_media_loader(mut self, media: Arc<dyn MediaLoader>) -> Self {
+        self.media = media;
+        self
+    }
+
     pub fn build(self) -> AppRuntime {
         AppRuntime {
             settings: self.settings,
             handler: self.handler,
             store: self.store,
+            media: self.media,
             adapters: self.adapters,
             workers: self.workers,
             metrics: self.metrics,
@@ -114,6 +121,7 @@ pub struct AppRuntime {
     settings: RuntimeSettings,
     handler: Arc<dyn MessageHandler>,
     store: Arc<dyn StateStore>,
+    media: Arc<dyn MediaLoader>,
     adapters: Vec<Arc<dyn PlatformAdapter>>,
     workers: Vec<Arc<dyn RuntimeWorker>>,
     metrics: Arc<RuntimeMetrics>,
@@ -129,6 +137,7 @@ impl AppRuntime {
             settings,
             handler,
             store,
+            media: Arc::new(UnsupportedMediaLoader),
             adapters: Vec::new(),
             workers: Vec::new(),
             worker_names: HashSet::new(),
@@ -150,6 +159,7 @@ impl AppRuntime {
             settings,
             handler,
             store,
+            media,
             adapters,
             workers,
             metrics,
@@ -178,6 +188,7 @@ impl AppRuntime {
         let context = Arc::new(HandlerContext::new(
             outbound.clone(),
             Arc::clone(&store),
+            media,
             cancel.clone(),
         ));
 

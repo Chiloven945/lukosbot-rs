@@ -6,7 +6,7 @@
 use lukosbot_core::PlatformError;
 use lukosbot_domain::{
     ChatAddress, ChatKind, InboundMessage, InboundPart, MediaRef, MediaSource, MessageContext,
-    PlatformChatId, PlatformKind, PlatformMessageId, PlatformUserId, Sender,
+    PlatformChatId, PlatformKind, PlatformMessageId, PlatformUserId, QuotedMessage, Sender,
 };
 use teloxide::types::{
     Chat, ChatKind as TelegramChatKind, Message, PublicChatKind, Update, UpdateKind,
@@ -37,6 +37,34 @@ fn map_message(message: &Message) -> Result<Option<InboundMessage>, PlatformErro
         map_chat_kind(&message.chat),
     );
 
+    let parts = map_parts(message)?;
+
+    let message_id = PlatformMessageId::new(message.id.0.to_string())
+        .map_err(|error| mapping(format!("message id: {error}")))?;
+
+    let reply_to = message
+        .reply_to_message()
+        .map(|reply| PlatformMessageId::new(reply.id.0.to_string()))
+        .transpose()
+        .map_err(|error| mapping(format!("reply message id: {error}")))?;
+    let quoted = message
+        .reply_to_message()
+        .map(map_quoted_message)
+        .transpose()?;
+
+    Ok(Some(InboundMessage {
+        address,
+        sender,
+        message_id: Some(message_id),
+        received_at: message.date,
+        parts,
+        reply_to,
+        quoted,
+        context: MessageContext::new(Some(false)),
+    }))
+}
+
+fn map_parts(message: &Message) -> Result<Vec<InboundPart>, PlatformError> {
     let mut parts = Vec::new();
     if let Some(text) = message.text().or_else(|| message.caption())
         && !text.is_empty()
@@ -75,24 +103,18 @@ fn map_message(message: &Message) -> Result<Option<InboundMessage>, PlatformErro
         }));
     }
 
+    Ok(parts)
+}
+
+fn map_quoted_message(message: &Message) -> Result<QuotedMessage, PlatformError> {
     let message_id = PlatformMessageId::new(message.id.0.to_string())
-        .map_err(|error| mapping(format!("message id: {error}")))?;
+        .map_err(|error| mapping(format!("quoted message id: {error}")))?;
 
-    let reply_to = message
-        .reply_to_message()
-        .map(|reply| PlatformMessageId::new(reply.id.0.to_string()))
-        .transpose()
-        .map_err(|error| mapping(format!("reply message id: {error}")))?;
-
-    Ok(Some(InboundMessage {
-        address,
-        sender,
+    Ok(QuotedMessage {
         message_id: Some(message_id),
-        received_at: message.date,
-        parts,
-        reply_to,
-        context: MessageContext::new(Some(false)),
-    }))
+        sender: map_sender(message)?,
+        parts: map_parts(message)?,
+    })
 }
 
 fn map_sender(message: &Message) -> Result<Option<Sender>, PlatformError> {
@@ -428,6 +450,13 @@ mod tests {
             message.reply_to.as_ref().map(PlatformMessageId::as_str),
             Some("4")
         );
+        let quoted = message.quoted.expect("quoted content is mapped");
+        assert_eq!(
+            quoted.message_id.as_ref().map(PlatformMessageId::as_str),
+            Some("4")
+        );
+        assert_eq!(quoted.parts.len(), 1);
+        assert_eq!(quoted.parts[0], InboundPart::Text("original".to_owned()));
     }
 
     #[test]

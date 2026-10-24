@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use url::Url;
 
 use crate::platform::PlatformKind;
@@ -11,6 +12,14 @@ pub struct MediaRef {
     pub size_bytes: Option<u64>,
 }
 
+/// Media that has been downloaded, generated, or otherwise materialized.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaContent {
+    pub bytes: Bytes,
+    pub file_name: Option<String>,
+    pub mime_type: Option<String>,
+}
+
 /// Where media can be obtained from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MediaSource {
@@ -21,4 +30,6 @@ pub enum MediaSource {
         platform: PlatformKind,
         file_id: String,
     },
+    /// Content that is already in memory.
+    Bytes(Bytes),
 }

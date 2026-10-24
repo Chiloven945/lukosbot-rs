@@ -35,6 +35,7 @@ fn inbound(text: &str) -> InboundMessage {
         received_at: Utc::now(),
         parts: vec![InboundPart::Text(text.to_owned())],
         reply_to: None,
+        quoted: None,
         context: Default::default(),
     }
 }
@@ -176,24 +177,34 @@ async fn twenty_four_timeout_is_delivered_to_the_original_chat() {
 #[tokio::test]
 async fn command_errors_are_reported_through_the_handler() {
     let harness = start_runtime(
-        &[
-            "/echo",
-            "/dice abc",
-            "/ping extra",
-            "/help luck img",
-            "/help luck nope",
-        ],
+        &["/echo", "/dice abc", "/ping extra", "/help luck nope"],
         None,
     )
     .await;
-    harness.adapter.wait_for_sends(5).await;
+    harness.adapter.wait_for_sends(4).await;
     let replies: Vec<String> = harness.adapter.sent().iter().map(text_of).collect();
 
     assert!(replies[0].contains("请输入要回显的文本"));
     assert!(replies[1].contains("需要整数"));
     assert!(replies[2].contains("不需要参数"));
-    assert!(replies[3].contains("图片版帮助尚未实现"));
-    assert!(replies[4].contains("未知的输出方式"));
+    assert!(replies[3].contains("未知的输出方式"));
+    finish(harness).await;
+}
+
+#[tokio::test]
+async fn help_image_is_generated_from_usage_metadata() {
+    let harness = start_runtime(&["/help luck img"], None).await;
+    harness.adapter.wait_for_sends(1).await;
+    let sent = harness.adapter.sent();
+    match &sent[0].message.parts[0] {
+        OutboundPart::Image { media, .. } => match &media.source {
+            lukosbot_domain::MediaSource::Bytes(bytes) => {
+                assert!(bytes.starts_with(&[0x89, b'P', b'N', b'G']));
+            }
+            other => panic!("expected generated image bytes, got {other:?}"),
+        },
+        other => panic!("expected an image reply, got {other:?}"),
+    }
     finish(harness).await;
 }
 

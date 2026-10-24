@@ -7,8 +7,9 @@ A multiplatform chatbot written in Rust, targeting Telegram and Discord.
 
 The repository currently contains the application foundation, a tested text command engine, basic
 commands, persisted state services, bot/chat authorization, policy enforcement, `/admin`, `/pref`,
-the first third-party API commands (`/github`, `/bilibili`, `/ip`, `/music`, `/whois`), and an H2
-state-import tool. Media, service scheduling, and the remaining JVM business commands remain
+the third-party API commands (`/github`, `/bilibili`, `/ip`, `/music`, `/whois`), media
+send/receive, the Cave, E621, Wikipedia/Minecraft Wiki, Markdown/screenshot and image-help paths,
+and an H2 state-import tool. Service scheduling and the remaining JVM business commands remain
 follow-up work.
 
 ## Status
@@ -22,7 +23,7 @@ follow-up work.
 | Structured logging (pretty / compact / JSON)                                 | done        |
 | SQLite state store, metadata/revision, namespace scans and migrations        | done        |
 | Shared HTTP client with timeouts and response limits                         | done        |
-| Telegram / Discord text message adapters                                     | minimal     |
+| Telegram / Discord text and media adapters                                   | done        |
 | Text command engine, aliases, raw/argv parsing, policy-aware text help       | done        |
 | Basic commands (`ping`, `echo`, `coin`, `dice`, `luck`, `24`, `help`, ...)   | done        |
 | State definitions, resolution service and TTL cleanup worker                 | done        |
@@ -31,9 +32,10 @@ follow-up work.
 | `/admin` and `/pref` command framework                                       | done        |
 | Third-party API commands (`/github`, `/bilibili`, `/ip`, `/music`, `/whois`) | done        |
 | H2 `bot_state` JSONL import                                                  | done        |
-| Media pipeline, service scheduler, remaining business features               | not started |
+| Media pipeline, Cave, E621, Wiki, screenshots and image help                 | done        |
+| Service scheduler, remaining business features                               | not started |
 
-The policy system, media pipeline, and the remaining JVM commands are separate follow-up plans. See
+The service scheduler and the remaining JVM commands are separate follow-up plans. See
 [docs/architecture.md](docs/architecture.md) and
 [docs/command-engine/behavior-matrix.md](docs/command-engine/behavior-matrix.md).
 
@@ -57,7 +59,8 @@ docs/
 ├── development.md
 ├── operations.md
 ├── migrations/           H2 JSONL export/import contract
-│   └── third-party-api/  integration behavior matrix
+│   ├── third-party-api/  integration behavior matrix
+│   └── media-web/        media/web behavior matrix
 ├── command-engine/
 │   └── behavior-matrix.md
 └── decisions/            architecture decision records
@@ -108,6 +111,14 @@ The default prefix is `/`. Type a command as a normal text message:
 /ip 1.1.1.1
 /music Never Gonna Give You Up
 /whois example.com
+/cave
+/cave add
+/e621 search post cat 2
+/wiki Java
+/wiki md Java
+/mcwiki 僵尸猪灵
+/mcwiki ss 下界合金
+/help wiki img
 ```
 
 `/luck` also accepts `/l` and `/jrrp`; `/github` accepts `/gh`; `/bilibili` accepts `/bili`.
@@ -115,10 +126,12 @@ The default prefix is `/`. Type a command as a normal text message:
 integration exists. Discord native slash commands are not implemented yet; these are text commands
 on both platforms.
 
-Command registration, prefix, basic-command switches, and third-party command switches live in the
-`[commands]` configuration section. Credentials and provider settings live under `[integrations]`.
-See [config/application.example.toml](config/application.example.toml) and the
-[third-party behavior matrix](docs/migrations/third-party-api/behavior-matrix.md).
+Command registration, prefix, basic/media/web/third-party switches live in the `[commands]`
+configuration section. Credentials and provider settings live under `[integrations]`; media, web and
+browser limits live under `[media]` and `[web]`. See
+[config/application.example.toml](config/application.example.toml),
+[third-party behavior matrix](docs/migrations/third-party-api/behavior-matrix.md) and
+[media/web behavior matrix](docs/migrations/media-web/behavior-matrix.md).
 
 ## CLI
 

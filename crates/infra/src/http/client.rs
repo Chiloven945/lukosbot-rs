@@ -132,23 +132,32 @@ impl HttpClient {
         serde_json::from_slice(&bytes).map_err(HttpError::Json)
     }
 
-    /// Streams the response body into memory, failing as soon as the limit is exceeded.
-    pub async fn read_limited(&self, mut response: Response) -> Result<Vec<u8>, HttpError> {
+    /// Streams the response body into memory, failing as soon as the configured limit is exceeded.
+    pub async fn read_limited(&self, response: Response) -> Result<Vec<u8>, HttpError> {
+        self.read_limited_with_limit(response, self.max_response_bytes)
+            .await
+    }
+
+    /// Streams the response body into memory with a caller-supplied limit.
+    ///
+    /// This is used by media and HTML pipelines that need a stricter budget than the global HTTP
+    /// response limit.
+    pub async fn read_limited_with_limit(
+        &self,
+        mut response: Response,
+        limit: u64,
+    ) -> Result<Vec<u8>, HttpError> {
         if let Some(length) = response.content_length()
-            && length > self.max_response_bytes
+            && length > limit
         {
-            return Err(HttpError::BodyTooLarge {
-                limit: self.max_response_bytes,
-            });
+            return Err(HttpError::BodyTooLarge { limit });
         }
 
         let mut body = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(HttpError::Body)? {
             let total = body.len() as u64 + chunk.len() as u64;
-            if total > self.max_response_bytes {
-                return Err(HttpError::BodyTooLarge {
-                    limit: self.max_response_bytes,
-                });
+            if total > limit {
+                return Err(HttpError::BodyTooLarge { limit });
             }
             body.extend_from_slice(&chunk);
         }

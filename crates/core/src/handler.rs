@@ -11,7 +11,7 @@ use lukosbot_domain::InboundMessage;
 
 use crate::error::BoxError;
 use crate::messaging::outbound::{OutboundHandle, SendError};
-use crate::ports::{StateStore, StateStoreError};
+use crate::ports::{MediaLoader, StateStore, StateStoreError};
 
 mod ping;
 
@@ -24,6 +24,7 @@ pub use ping::PingHandler;
 pub struct HandlerContext {
     outbound: OutboundHandle,
     state: Arc<dyn StateStore>,
+    media: Arc<dyn MediaLoader>,
     cancel: CancellationToken,
 }
 
@@ -41,11 +42,13 @@ impl HandlerContext {
     pub fn new(
         outbound: OutboundHandle,
         state: Arc<dyn StateStore>,
+        media: Arc<dyn MediaLoader>,
         cancel: CancellationToken,
     ) -> Self {
         Self {
             outbound,
             state,
+            media,
             cancel,
         }
     }
@@ -56,6 +59,10 @@ impl HandlerContext {
 
     pub fn state(&self) -> &Arc<dyn StateStore> {
         &self.state
+    }
+
+    pub fn media(&self) -> &Arc<dyn MediaLoader> {
+        &self.media
     }
 
     /// Cancellation token for the current application lifetime.

@@ -28,8 +28,8 @@ pub const ENV_PREFIX: &str = "LUKOSBOT";
 pub const ENV_SEPARATOR: &str = "__";
 
 pub use integrations::{
-    GitHubSettings, IntegrationsSection, MusicSettings, SoundCloudSettings, SpotifySettings,
-    WhoisSettings,
+    E621Settings, GitHubSettings, IntegrationsSection, MusicSettings, SoundCloudSettings,
+    SpotifySettings, WhoisSettings,
 };
 pub use load::{
     CliOverrides, CompiledPlatforms, ConfigError, ConfigIssues, LoadOptions, LoadedConfig, load,
@@ -37,9 +37,10 @@ pub use load::{
 pub use platforms::{DiscordSection, PlatformsSection, TelegramSection};
 pub use policy::{PolicyMatchConfig, PolicyRuleConfig, PolicySection};
 pub use sections::{
-    AppConfig, AppSection, BasicCommandSettings, CommandsSection, ControlCommandSettings,
-    Environment, HttpSection, IntegrationCommandSettings, LogFormat, LoggingSection,
-    RuntimeSection, StorageSection, TwentyFourSettings,
+    AppConfig, AppSection, BasicCommandSettings, BrowserSection, CommandsSection,
+    ControlCommandSettings, Environment, HttpSection, ImageTheme, IntegrationCommandSettings,
+    LogFormat, LoggingSection, MediaCommandSettings, MediaSection, RenderingSection,
+    RuntimeSection, StorageSection, TwentyFourSettings, WebCommandSettings, WebSection,
 };
 pub use security::SecuritySection;
 pub use summary::ConfigSummary;

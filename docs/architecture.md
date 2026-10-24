@@ -4,9 +4,9 @@
 
 The codebase separates platform SDKs, infrastructure, command parsing, concrete commands, and
 process assembly so that each can be tested without the others. The current command engine covers
-text commands, policy enforcement, persisted state, core administration, and the first set of
-third-party API commands; media, service scheduling, and the remaining JVM business commands remain
-follow-up work.
+text commands, policy enforcement, persisted state, core administration, third-party API commands,
+media send/receive, Cave, E621, Wiki/Markdown/screenshots, and image help; service scheduling and
+the remaining JVM business commands remain follow-up work.
 
 ## Crates and dependency direction
 
@@ -53,9 +53,9 @@ Rules:
   It depends on no project crate, HTTP client, database, or platform SDK.
 - `lukosbot-command-engine` knows command definitions, parsing, and help rendering, but not platform
   SDKs or concrete business commands.
-- `lukosbot-commands` contains concrete commands, integration command formatting, and the supervised
-  24-point actor. It depends on the engine, core, and integration contracts, never on Telegram,
-  Discord, or `reqwest`.
+- `lukosbot-commands` contains concrete commands, integration command formatting, media/web
+  commands, image rendering, and the supervised 24-point actor. It depends on the engine, core, and
+  integration contracts, never on Telegram, Discord, or `reqwest`.
 - `lukosbot-app` is the only composition root. It builds the command registry, handler, workers,
   external-service implementations, infrastructure, and runtime.
 
@@ -129,6 +129,19 @@ Workers are spawned through the same `TaskSupervisor` as adapters and the dispat
 worker exit, panic, duplicate names, and names that shadow platform tasks are treated as assembly or
 runtime failures. A worker that ignores cancellation is still bounded by the shared shutdown
 deadline.
+
+## Media and web
+
+- `MediaSource::Bytes` carries generated or downloaded content; URL and platform-file sources are
+  resolved through `lukosbot_infra::media::HttpMediaLoader`.
+- `MediaLoader` is a core port injected into `HandlerContext` and `CommandContext`; platform file
+  downloads remain behind `PlatformAdapter`.
+- `commands::media` owns Cave, E621, and the shared image renderer; `commands::web` owns Wiki
+  commands.
+- Wiki HTML/Markdown and WebDriver screenshots live in `lukosbot-infra::web`; screenshots run
+  through a bounded supervised worker, not detached tasks.
+- E621 and Wiki models/contracts live in `lukosbot-integrations`; provider DTOs stay private to
+  infra.
 
 ## Third-party integrations
 
@@ -216,20 +229,22 @@ with a long-poll-compatible timeout and the configured proxy, while the Discord 
 serenity's native-TLS backend so the process does not link a second, EOL Rustls major version.
 Retries are opt-in via `RetryPolicy` and only apply to errors the caller marks as retryable.
 
-This is **not** a user-facing URL fetcher. Any feature that downloads user-supplied URLs must add
-scheme validation, private/link-local/metadata address rejection, redirect limits, and DNS rebinding
-protections in its own design.
+This is **not** an unrestricted user-facing URL fetcher. `lukosbot_infra::media` applies HTTPS,
+exact-host allowlists, redirect-by-redirect validation, private/link-local/metadata address
+rejection, byte limits, and pixel limits. Wiki screenshots use a separately configured, network-
+isolated WebDriver environment; application-level URL validation alone is not treated as browser
+sandboxing.
 
 ## Extension points
 
 - `MessageHandler` is the boundary to the command engine.
-- `PlatformAdapter` is the boundary for richer platform behaviour (media upload, interactions, slash
-  commands).
+- `PlatformAdapter` is the boundary for platform behaviour including text/image/file sending and
+  platform file downloads.
 - `StateStore` is the boundary for preferences, admin state, and service state.
 - `StateDefinition` / `StateRegistry` / `StateService` are the boundary for typed scoped state.
 - `ChatAdminResolver` is the platform boundary for chat-administrator checks.
 - `CommandPolicy` is the command-engine boundary for immutable policy evaluation.
-- `HttpClient` is the shared client for future third-party API commands.
+- `HttpClient` is the shared client for third-party API commands and bounded media/HTML loading.
 - `RuntimeWorker` is the boundary for supervised long-lived components.
 
 New crates require a concrete boundary benefit; the eight crates above are intentionally the whole

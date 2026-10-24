@@ -80,6 +80,30 @@ impl fmt::Display for ConfigSummary<'_> {
         )?;
         writeln!(
             f,
+            "e621: interval={}ms max_results={} configured=true",
+            config.integrations.e621.request_interval_ms,
+            config.integrations.e621.max_results_per_page
+        )?;
+        writeln!(
+            f,
+            "media: download={}B upload={}B thumbnail={}B pixels={} concurrency={}",
+            config.media.max_download_bytes,
+            config.media.max_upload_bytes,
+            config.media.max_thumbnail_bytes,
+            config.media.max_image_pixels,
+            config.media.max_concurrent_downloads
+        )?;
+        writeln!(
+            f,
+            "web: timeout={}s html={}B markdown={}B redirects={} browser={}",
+            config.web.request_timeout_secs,
+            config.web.max_html_bytes,
+            config.web.max_markdown_bytes,
+            config.web.max_redirects,
+            config.web.browser.enabled
+        )?;
+        writeln!(
+            f,
             "commands: prefix={} ping={} echo={} coin={} dice={} luck={} twenty_four={} twenty_four_time_limit={}s weather={} admin={} pref={} service={}",
             config.commands.prefix,
             config.commands.basic.ping,
@@ -93,6 +117,14 @@ impl fmt::Display for ConfigSummary<'_> {
             config.commands.control.admin,
             config.commands.control.pref,
             config.commands.control.service
+        )?;
+        writeln!(
+            f,
+            "media_commands: cave={} e621={} web_commands: wiki={} mcwiki={}",
+            config.commands.media.cave,
+            config.commands.media.e621,
+            config.commands.web.wiki,
+            config.commands.web.mcwiki
         )?;
         writeln!(
             f,

@@ -101,6 +101,7 @@ fn collect_syntaxes(definition: &CommandDefinition, prefix: &str) -> Vec<(String
         &definition.usage.syntaxes,
         &mut output,
         &mut seen,
+        !definition.usage.syntaxes.is_empty(),
     );
     output
 }
@@ -112,8 +113,12 @@ fn collect_node_syntax(
     explicit: &[SyntaxLine],
     output: &mut Vec<(String, Option<String>)>,
     seen: &mut HashSet<String>,
+    suppress_auto: bool,
 ) {
-    if explicit.is_empty() {
+    if suppress_auto && explicit.is_empty() && node.executor.is_some() {
+        // The root command supplied explicit syntax covering this node. Do not add a second,
+        // less descriptive auto-generated line for the same executable leaf.
+    } else if explicit.is_empty() {
         if node.executor.is_some() {
             let invocation = render_auto_invocation(path, &node.input, prefix);
             if seen.insert(invocation.clone()) {
@@ -143,6 +148,7 @@ fn collect_node_syntax(
             &child.usage.syntaxes,
             output,
             seen,
+            suppress_auto,
         );
     }
 }

@@ -34,6 +34,7 @@ pub(crate) fn inbound(address: &ChatAddress, text: &str) -> InboundMessage {
         received_at: Utc::now(),
         parts: vec![InboundPart::Text(text.to_owned())],
         reply_to: None,
+        quoted: None,
         context: Default::default(),
     }
 }

@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use lukosbot_core::PlatformError;
 use lukosbot_domain::{
     ChatAddress, ChatKind, InboundMessage, InboundPart, MediaRef, MediaSource, MessageContext,
-    PlatformChatId, PlatformKind, PlatformMessageId, PlatformUserId, Sender,
+    PlatformChatId, PlatformKind, PlatformMessageId, PlatformUserId, QuotedMessage, Sender,
 };
 use serenity::model::channel::Message;
 use url::Url;
@@ -44,6 +44,36 @@ pub(crate) fn map_message(
         username: Some(message.author.name.clone()),
     };
 
+    let parts = map_parts(message)?;
+
+    let message_id = PlatformMessageId::new(message.id.get().to_string())
+        .map_err(|error| mapping(format!("message id: {error}")))?;
+
+    let reply_to = message
+        .referenced_message
+        .as_ref()
+        .map(|reply| PlatformMessageId::new(reply.id.get().to_string()))
+        .transpose()
+        .map_err(|error| mapping(format!("reply message id: {error}")))?;
+    let quoted = message
+        .referenced_message
+        .as_ref()
+        .map(|reply| map_quoted_message(reply))
+        .transpose()?;
+
+    Ok(Some(InboundMessage {
+        address,
+        sender,
+        message_id: Some(message_id),
+        received_at,
+        parts,
+        reply_to,
+        quoted,
+        context: MessageContext::new(nsfw),
+    }))
+}
+
+fn map_parts(message: &Message) -> Result<Vec<InboundPart>, PlatformError> {
     let mut parts = Vec::new();
     if !message.content.is_empty() {
         parts.push(InboundPart::Text(message.content.clone()));
@@ -72,25 +102,28 @@ pub(crate) fn map_message(
         });
     }
 
+    Ok(parts)
+}
+
+fn map_quoted_message(message: &Message) -> Result<QuotedMessage, PlatformError> {
     let message_id = PlatformMessageId::new(message.id.get().to_string())
-        .map_err(|error| mapping(format!("message id: {error}")))?;
+        .map_err(|error| mapping(format!("quoted message id: {error}")))?;
+    let sender = Sender {
+        id: PlatformUserId::new(message.author.id.get().to_string())
+            .map_err(|error| mapping(format!("quoted user id: {error}")))?,
+        display_name: message
+            .author
+            .global_name
+            .clone()
+            .or_else(|| Some(message.author.name.clone())),
+        username: Some(message.author.name.clone()),
+    };
 
-    let reply_to = message
-        .referenced_message
-        .as_ref()
-        .map(|reply| PlatformMessageId::new(reply.id.get().to_string()))
-        .transpose()
-        .map_err(|error| mapping(format!("reply message id: {error}")))?;
-
-    Ok(Some(InboundMessage {
-        address,
-        sender,
+    Ok(QuotedMessage {
         message_id: Some(message_id),
-        received_at,
-        parts,
-        reply_to,
-        context: MessageContext::new(nsfw),
-    }))
+        sender: Some(sender),
+        parts: map_parts(message)?,
+    })
 }
 
 fn mapping(message: impl Into<String>) -> PlatformError {
@@ -266,5 +299,8 @@ mod tests {
             message.reply_to.as_ref().map(PlatformMessageId::as_str),
             Some("9")
         );
+        let quoted = message.quoted.expect("quoted content is mapped");
+        assert_eq!(quoted.parts.len(), 1);
+        assert_eq!(quoted.parts[0], InboundPart::Text("original".to_owned()));
     }
 }

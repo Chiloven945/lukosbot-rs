@@ -39,7 +39,8 @@ pub(crate) fn map_integration_error(
         IntegrationError::Transport { .. }
         | IntegrationError::InvalidResponse { .. }
         | IntegrationError::Upstream { .. }
-        | IntegrationError::AllProvidersFailed { .. } => {
+        | IntegrationError::AllProvidersFailed { .. }
+        | IntegrationError::Unavailable { .. } => {
             tracing::warn!(category, "third-party request failed");
             CommandError::UserInput("第三方服务暂时不可用，请稍后重试。".to_owned())
         }

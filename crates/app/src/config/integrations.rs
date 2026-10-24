@@ -10,6 +10,7 @@ pub struct IntegrationsSection {
     pub github: GitHubSettings,
     pub music: MusicSettings,
     pub whois: WhoisSettings,
+    pub e621: E621Settings,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -107,6 +108,24 @@ impl Default for WhoisSettings {
             connect_timeout_secs: 3,
             total_timeout_secs: 8,
             max_response_bytes: 64 * 1024,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct E621Settings {
+    pub request_interval_ms: u64,
+    pub max_results_per_page: u8,
+    pub user_agent: String,
+}
+
+impl Default for E621Settings {
+    fn default() -> Self {
+        Self {
+            request_interval_ms: 1_000,
+            max_results_per_page: 12,
+            user_agent: "LukosBot/0.1 (+https://github.com/Chiloven945/lukosbot-rs)".to_owned(),
         }
     }
 }

@@ -10,8 +10,9 @@ use url::Url;
 
 use lukosbot_command_engine::CommandMessageHandler;
 use lukosbot_commands::{
-    BasicCommandsConfig, ControlCommands, IntegrationCommandServices, RegistryBuildDependencies,
-    RuntimeInfo, ThirdPartyCommandsConfig, build_registry_with_dependencies,
+    BasicCommandsConfig, ControlCommands, IntegrationCommandServices, MediaCommandServices,
+    MediaCommandsConfig, RegistryBuildDependencies, RuntimeInfo, ThirdPartyCommandsConfig,
+    WebCommandServices, WebCommandsConfig, build_registry_with_dependencies,
 };
 use lukosbot_core::policy::{AllowAllPolicy, PolicyEngine, PolicyMatch, PolicyRule};
 use lukosbot_core::testing::{MemoryStateStore, RecordingAdapter, SentRecord};
@@ -212,6 +213,7 @@ fn inbound(text: &str) -> InboundMessage {
         received_at: Utc::now(),
         parts: vec![InboundPart::Text(text.to_owned())],
         reply_to: None,
+        quoted: None,
         context: Default::default(),
     }
 }
@@ -261,11 +263,15 @@ async fn integration_commands_are_reachable_with_aliases_and_arguments() {
             twenty_four: false,
             weather: false,
         },
+        media: MediaCommandsConfig::all_disabled(),
+        web: WebCommandsConfig::all_disabled(),
         third_party: ThirdPartyCommandsConfig::default(),
         runtime_info: Arc::new(RuntimeInfo::new("test")),
         twenty_four: None,
         controls: ControlCommands::default(),
         services,
+        media_services: MediaCommandServices::default(),
+        web_services: WebCommandServices::default(),
     })
     .unwrap();
     let handler = Arc::new(
@@ -358,6 +364,8 @@ async fn policy_denial_happens_before_the_integration_service_is_called() {
             twenty_four: false,
             weather: false,
         },
+        media: MediaCommandsConfig::all_disabled(),
+        web: WebCommandsConfig::all_disabled(),
         third_party: ThirdPartyCommandsConfig {
             github: true,
             ..ThirdPartyCommandsConfig::all_disabled()
@@ -366,6 +374,8 @@ async fn policy_denial_happens_before_the_integration_service_is_called() {
         twenty_four: None,
         controls: ControlCommands::default(),
         services,
+        media_services: MediaCommandServices::default(),
+        web_services: WebCommandServices::default(),
     })
     .unwrap();
     let policy = PolicyEngine::new(vec![PolicyRule {

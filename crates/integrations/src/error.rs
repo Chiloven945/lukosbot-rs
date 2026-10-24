@@ -48,6 +48,9 @@ pub enum IntegrationError {
 
     #[error("the response exceeds {limit} bytes")]
     ResponseTooLarge { limit: u64 },
+
+    #[error("the integration is unavailable: {message}")]
+    Unavailable { message: String },
 }
 
 impl IntegrationError {
@@ -65,6 +68,7 @@ impl IntegrationError {
             Self::Upstream { .. } => "upstream",
             Self::AllProvidersFailed { .. } => "all_providers_failed",
             Self::ResponseTooLarge { .. } => "response_too_large",
+            Self::Unavailable { .. } => "unavailable",
         }
     }
 

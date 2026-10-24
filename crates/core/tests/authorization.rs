@@ -77,6 +77,7 @@ fn message(kind: ChatKind, user_id: &str) -> InboundMessage {
         received_at: Utc::now(),
         parts: vec![InboundPart::Text("/admin me".to_owned())],
         reply_to: None,
+        quoted: None,
         context: MessageContext::default(),
     }
 }

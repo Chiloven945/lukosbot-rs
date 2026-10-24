@@ -49,6 +49,17 @@ impl MessageContext {
     }
 }
 
+/// One level of a replied-to message.
+///
+/// The contents are intentionally not recursive: a quoted message never carries another quoted
+/// message. Adapters map only the immediate reply target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuotedMessage {
+    pub message_id: Option<PlatformMessageId>,
+    pub sender: Option<Sender>,
+    pub parts: Vec<InboundPart>,
+}
+
 /// A message received from a platform, normalised into platform-independent parts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InboundMessage {
@@ -58,6 +69,7 @@ pub struct InboundMessage {
     pub received_at: DateTime<Utc>,
     pub parts: Vec<InboundPart>,
     pub reply_to: Option<PlatformMessageId>,
+    pub quoted: Option<QuotedMessage>,
     pub context: MessageContext,
 }
 
@@ -158,6 +170,7 @@ mod tests {
             received_at: Utc::now(),
             parts,
             reply_to: None,
+            quoted: None,
             context: MessageContext::default(),
         }
     }

@@ -7,16 +7,19 @@
 #![forbid(unsafe_code)]
 
 pub mod bilibili;
+pub mod e621;
 pub mod error;
 pub mod github;
 pub mod ip;
 pub mod music;
 pub mod whois;
+pub mod wiki;
 
 pub use bilibili::{
     BILIBILI_HOSTS, BilibiliOwner, BilibiliService, BilibiliStats, BilibiliTarget, BilibiliVideo,
     VideoId, extract_video_id, parse_bilibili_target,
 };
+pub use e621::{E621Artist, E621File, E621Md5, E621Post, E621Rating, E621Service};
 pub use error::{BoxError, IntegrationError};
 pub use github::{
     GitHubOrder, GitHubRepository, GitHubRepositoryBrief, GitHubSearchParams, GitHubSearchResult,
@@ -29,3 +32,4 @@ pub use music::{
     MusicLink, MusicLinkError, MusicPlatform, MusicService, TrackInfo, parse_music_link,
 };
 pub use whois::{WhoisRecord, WhoisService};
+pub use wiki::{RenderedDocument, WikiService, WikiSite, WikiSummary, WikiTarget};

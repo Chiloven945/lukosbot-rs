@@ -57,3 +57,53 @@ impl Default for ThirdPartyCommandsConfig {
         }
     }
 }
+
+/// Which media commands are registered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MediaCommandsConfig {
+    pub cave: bool,
+    pub e621: bool,
+}
+
+impl MediaCommandsConfig {
+    pub const fn all_disabled() -> Self {
+        Self {
+            cave: false,
+            e621: false,
+        }
+    }
+}
+
+impl Default for MediaCommandsConfig {
+    fn default() -> Self {
+        Self {
+            cave: true,
+            e621: true,
+        }
+    }
+}
+
+/// Which web commands are registered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WebCommandsConfig {
+    pub wiki: bool,
+    pub mcwiki: bool,
+}
+
+impl WebCommandsConfig {
+    pub const fn all_disabled() -> Self {
+        Self {
+            wiki: false,
+            mcwiki: false,
+        }
+    }
+}
+
+impl Default for WebCommandsConfig {
+    fn default() -> Self {
+        Self {
+            wiki: true,
+            mcwiki: true,
+        }
+    }
+}
